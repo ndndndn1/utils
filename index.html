@@ -240,6 +240,11 @@
                 <input type="number" id="templateSize" value="41" min="11" max="101" step="2">
                 <span class="template-size-info">Used for propagation matching</span>
             </div>
+            <div class="setting-row">
+                <label>Ray Threshold:</label>
+                <input type="number" id="rayThreshold" value="1.00" min="0.01" max="5.00" step="0.01">
+                <span class="template-size-info">Stop when intensity > mean × threshold (default: 1.00)</span>
+            </div>
             <p class="help-text">
                 Click on an image to set the measurement start point.
                 Then click "Propagate" to find similar points in other images.
@@ -259,6 +264,13 @@
 
         // File input handler
         document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+
+        // Ray threshold change handler - re-measure when threshold changes
+        document.getElementById('rayThreshold').addEventListener('change', function() {
+            if (state.measured && state.images.some(img => img.startPoint)) {
+                measureAll();
+            }
+        });
 
         async function handleFileUpload(e) {
             const files = Array.from(e.target.files);
@@ -573,6 +585,7 @@
             const angleStart = parseFloat(document.getElementById('angleStart').value);
             const angleEnd = parseFloat(document.getElementById('angleEnd').value);
             const angleStep = parseFloat(document.getElementById('angleStep').value);
+            const rayThreshold = parseFloat(document.getElementById('rayThreshold').value);
 
             updateStatus('Measuring...');
             document.getElementById('progressBarContainer').style.display = 'block';
@@ -582,7 +595,7 @@
                 const img = state.images[i];
                 if (!img.startPoint) continue;
 
-                img.results = performRaycast(img, angleStart, angleEnd, angleStep);
+                img.results = performRaycast(img, angleStart, angleEnd, angleStep, rayThreshold);
                 redrawCanvas(i);
 
                 // Update preview
@@ -603,9 +616,10 @@
             updateButtons();
         }
 
-        function performRaycast(img, angleStart, angleEnd, angleStep) {
+        function performRaycast(img, angleStart, angleEnd, angleStep, threshold) {
             const results = [];
             const { startPoint, grayData, width, height, globalMean } = img;
+            const thresholdValue = globalMean * threshold;
             const maxRadius = Math.ceil(Math.hypot(
                 Math.max(startPoint.x, width - startPoint.x),
                 Math.max(startPoint.y, height - startPoint.y)
@@ -625,7 +639,7 @@
                     // Bilinear interpolation
                     const intensity = bilinearSample(grayData, width, height, x, y);
 
-                    if (intensity > globalMean) {
+                    if (intensity > thresholdValue) {
                         results.push({
                             angle_deg: angle,
                             r_pixels: r,
