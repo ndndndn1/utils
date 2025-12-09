@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Image Measurement Tool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #00d9ff;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        .btn-primary:hover {
+            background: #00b8d9;
+        }
+        .btn-success {
+            background: #00ff88;
+            color: #1a1a2e;
+        }
+        .btn-success:hover {
+            background: #00cc6a;
+        }
+        .btn-warning {
+            background: #ffaa00;
+            color: #1a1a2e;
+        }
+        .btn-warning:hover {
+            background: #dd9500;
+        }
+        .btn-danger {
+            background: #ff4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #cc3333;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #fileInput {
+            display: none;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .image-card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            position: relative;
+        }
+        .image-card.selected {
+            border: 3px solid #00d9ff;
+        }
+        .image-card h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #00d9ff;
+            word-break: break-all;
+        }
+        .canvas-container {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        .canvas-container canvas {
+            max-width: 100%;
+            height: auto;
+            cursor: crosshair;
+            border-radius: 5px;
+        }
+        .coord-info {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .coord-info span {
+            color: #00ff88;
+        }
+        .status-bar {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .status-bar p {
+            margin: 5px 0;
+        }
+        .settings-panel {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .settings-panel h3 {
+            margin-bottom: 15px;
+            color: #00d9ff;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .setting-row label {
+            min-width: 150px;
+        }
+        .setting-row input {
+            padding: 5px 10px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background: #1a1a2e;
+            color: #eee;
+            width: 100px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            transition: width 0.3s;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .measurement-preview {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 5px;
+            font-size: 11px;
+        }
+        .template-size-info {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 2px 8px;
+            background: #333;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Batch Image Measurement Tool</h1>
+
+        <div class="status-bar">
+            <p><strong>Status:</strong> <span id="statusText">Ready - Upload images to begin</span></p>
+            <p><strong>Images Loaded:</strong> <span id="imageCount">0</span> |
+               <strong>With Start Points:</strong> <span id="pointCount">0</span> |
+               <strong>Measured:</strong> <span id="measuredCount">0</span></p>
+            <div class="progress-bar" id="progressBarContainer" style="display: none;">
+                <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <input type="file" id="fileInput" multiple accept="image/*">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                1. Upload Images
+            </button>
+            <button class="btn btn-warning" id="propagateBtn" onclick="propagateStartPoint()" disabled>
+                2. Propagate Start Point
+            </button>
+            <button class="btn btn-success" id="measureBtn" onclick="measureAll()" disabled>
+                3. Measure All
+            </button>
+            <button class="btn btn-primary" id="exportBtn" onclick="exportToXlsx()" disabled>
+                4. Export XLSX
+            </button>
+            <button class="btn btn-danger" onclick="clearAll()">
+                Clear All
+            </button>
+        </div>
+
+        <div class="settings-panel">
+            <h3>Settings</h3>
+            <div class="setting-row">
+                <label>Angle Start (deg):</label>
+                <input type="number" id="angleStart" value="0" min="0" max="359">
+            </div>
+            <div class="setting-row">
+                <label>Angle End (deg):</label>
+                <input type="number" id="angleEnd" value="180" min="1" max="360">
+            </div>
+            <div class="setting-row">
+                <label>Angle Step (deg):</label>
+                <input type="number" id="angleStep" value="1" min="0.1" max="10" step="0.1">
+            </div>
+            <div class="setting-row">
+                <label>Template Size (px):</label>
+                <input type="number" id="templateSize" value="41" min="11" max="101" step="2">
+                <span class="template-size-info">Used for propagation matching</span>
+            </div>
+            <p class="help-text">
+                Click on an image to set the measurement start point.
+                Then click "Propagate" to find similar points in other images.
+            </p>
+        </div>
+
+        <div class="image-grid" id="imageGrid"></div>
+    </div>
+
+    <script>
+        // Global state
+        const state = {
+            images: [],  // {name, element, canvas, ctx, grayData, startPoint, results}
+            sourceIndex: null,  // index of image used for propagation
+            measured: false
+        };
+
+        // File input handler
+        document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+
+        async function handleFileUpload(e) {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            updateStatus('Loading images...');
+            const grid = document.getElementById('imageGrid');
+
+            for (const file of files) {
+                const img = await loadImage(file);
+                const index = state.images.length;
+
+                // Create card
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.id = `card-${index}`;
+                card.innerHTML = `
+                    <h3>${file.name}</h3>
+                    <div class="canvas-container">
+                        <canvas id="canvas-${index}"></canvas>
+                    </div>
+                    <div class="coord-info">
+                        Start Point: <span id="coord-${index}">Not set</span>
+                    </div>
+                    <div class="measurement-preview" id="preview-${index}" style="display:none;"></div>
+                `;
+                grid.appendChild(card);
+
+                // Setup canvas
+                const canvas = document.getElementById(`canvas-${index}`);
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                // Get grayscale data
+                const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                const grayData = toGrayscale(imageData);
+
+                // Store state
+                state.images.push({
+                    name: file.name,
+                    element: img,
+                    canvas: canvas,
+                    ctx: ctx,
+                    grayData: grayData,
+                    width: img.width,
+                    height: img.height,
+                    startPoint: null,
+                    results: null,
+                    globalMean: calculateGlobalMean(grayData)
+                });
+
+                // Add click handler
+                canvas.addEventListener('click', (e) => handleCanvasClick(e, index));
+            }
+
+            updateCounts();
+            updateStatus('Images loaded. Click on an image to set start point.');
+            e.target.value = '';  // Reset input
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function toGrayscale(imageData) {
+            const data = imageData.data;
+            const gray = new Float32Array(imageData.width * imageData.height);
+            for (let i = 0; i < gray.length; i++) {
+                const idx = i * 4;
+                // ITU-R BT.601 formula
+                gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+            }
+            return gray;
+        }
+
+        function calculateGlobalMean(grayData) {
+            let sum = 0;
+            for (let i = 0; i < grayData.length; i++) {
+                sum += grayData[i];
+            }
+            return sum / grayData.length;
+        }
+
+        function handleCanvasClick(e, index) {
+            const canvas = state.images[index].canvas;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            setStartPoint(index, x, y);
+            state.sourceIndex = index;
+
+            // Highlight selected card
+            document.querySelectorAll('.image-card').forEach(c => c.classList.remove('selected'));
+            document.getElementById(`card-${index}`).classList.add('selected');
+
+            updateStatus(`Start point set at (${x}, ${y}) on "${state.images[index].name}". Click "Propagate" to apply to other images.`);
+            updateButtons();
+        }
+
+        function setStartPoint(index, x, y) {
+            const img = state.images[index];
+            img.startPoint = { x, y };
+
+            // Redraw canvas
+            redrawCanvas(index);
+
+            // Update coordinate display
+            document.getElementById(`coord-${index}`).textContent = `(${x}, ${y})`;
+            updateCounts();
+        }
+
+        function redrawCanvas(index) {
+            const img = state.images[index];
+            const ctx = img.ctx;
+
+            // Clear and redraw image
+            ctx.drawImage(img.element, 0, 0);
+
+            // Draw start point if exists
+            if (img.startPoint) {
+                ctx.beginPath();
+                ctx.arc(img.startPoint.x, img.startPoint.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw crosshair
+                ctx.beginPath();
+                ctx.moveTo(img.startPoint.x - 15, img.startPoint.y);
+                ctx.lineTo(img.startPoint.x + 15, img.startPoint.y);
+                ctx.moveTo(img.startPoint.x, img.startPoint.y - 15);
+                ctx.lineTo(img.startPoint.x, img.startPoint.y + 15);
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // Draw measurement results if exists
+            if (img.results && img.results.length > 0) {
+                ctx.fillStyle = 'rgba(255, 165, 0, 0.6)';
+                ctx.strokeStyle = 'rgba(255, 165, 0, 0.3)';
+                ctx.lineWidth = 1;
+
+                for (const r of img.results) {
+                    // Draw ray line
+                    ctx.beginPath();
+                    ctx.moveTo(img.startPoint.x, img.startPoint.y);
+                    ctx.lineTo(r.x, r.y);
+                    ctx.stroke();
+
+                    // Draw detection point
+                    ctx.beginPath();
+                    ctx.arc(r.x, r.y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function propagateStartPoint() {
+            if (state.sourceIndex === null) {
+                alert('Please set a start point on one image first.');
+                return;
+            }
+
+            const source = state.images[state.sourceIndex];
+            if (!source.startPoint) {
+                alert('Source image has no start point.');
+                return;
+            }
+
+            updateStatus('Propagating start point to other images...');
+            const templateSize = parseInt(document.getElementById('templateSize').value);
+
+            // Extract template from source image
+            const template = extractTemplate(source, source.startPoint.x, source.startPoint.y, templateSize);
+
+            let propagated = 0;
+            for (let i = 0; i < state.images.length; i++) {
+                if (i === state.sourceIndex) continue;
+
+                const target = state.images[i];
+                const match = findBestMatch(target, template, templateSize);
+
+                if (match) {
+                    setStartPoint(i, match.x, match.y);
+                    propagated++;
+                }
+            }
+
+            updateStatus(`Propagated start point to ${propagated} images. Review and adjust if needed.`);
+            updateButtons();
+        }
+
+        function extractTemplate(img, cx, cy, size) {
+            const halfSize = Math.floor(size / 2);
+            const template = [];
+
+            for (let dy = -halfSize; dy <= halfSize; dy++) {
+                const row = [];
+                for (let dx = -halfSize; dx <= halfSize; dx++) {
+                    const x = cx + dx;
+                    const y = cy + dy;
+                    if (x >= 0 && x < img.width && y >= 0 && y < img.height) {
+                        row.push(img.grayData[y * img.width + x]);
+                    } else {
+                        row.push(0);
+                    }
+                }
+                template.push(row);
+            }
+            return template;
+        }
+
+        function findBestMatch(img, template, templateSize) {
+            const halfSize = Math.floor(templateSize / 2);
+            let bestScore = -Infinity;
+            let bestX = 0, bestY = 0;
+
+            // Search step for performance
+            const step = Math.max(1, Math.floor(Math.min(img.width, img.height) / 100));
+
+            // First pass: coarse search
+            for (let y = halfSize; y < img.height - halfSize; y += step) {
+                for (let x = halfSize; x < img.width - halfSize; x += step) {
+                    const score = calculateNCC(img, template, x, y, halfSize);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+
+            // Second pass: fine search around best match
+            let refinedX = bestX, refinedY = bestY;
+            let refinedScore = bestScore;
+
+            for (let dy = -step; dy <= step; dy++) {
+                for (let dx = -step; dx <= step; dx++) {
+                    const x = bestX + dx;
+                    const y = bestY + dy;
+                    if (x < halfSize || x >= img.width - halfSize ||
+                        y < halfSize || y >= img.height - halfSize) continue;
+
+                    const score = calculateNCC(img, template, x, y, halfSize);
+                    if (score > refinedScore) {
+                        refinedScore = score;
+                        refinedX = x;
+                        refinedY = y;
+                    }
+                }
+            }
+
+            return { x: refinedX, y: refinedY, score: refinedScore };
+        }
+
+        function calculateNCC(img, template, cx, cy, halfSize) {
+            // Normalized Cross-Correlation
+            let sumT = 0, sumI = 0, sumTT = 0, sumII = 0, sumTI = 0;
+            let count = 0;
+
+            for (let dy = -halfSize; dy <= halfSize; dy++) {
+                for (let dx = -halfSize; dx <= halfSize; dx++) {
+                    const tx = dx + halfSize;
+                    const ty = dy + halfSize;
+                    const t = template[ty][tx];
+                    const i = img.grayData[(cy + dy) * img.width + (cx + dx)];
+
+                    sumT += t;
+                    sumI += i;
+                    sumTT += t * t;
+                    sumII += i * i;
+                    sumTI += t * i;
+                    count++;
+                }
+            }
+
+            const meanT = sumT / count;
+            const meanI = sumI / count;
+            const varT = sumTT / count - meanT * meanT;
+            const varI = sumII / count - meanI * meanI;
+            const covar = sumTI / count - meanT * meanI;
+
+            if (varT <= 0 || varI <= 0) return 0;
+            return covar / (Math.sqrt(varT) * Math.sqrt(varI));
+        }
+
+        async function measureAll() {
+            const imagesWithPoints = state.images.filter(img => img.startPoint);
+            if (imagesWithPoints.length === 0) {
+                alert('No images have start points set.');
+                return;
+            }
+
+            const angleStart = parseFloat(document.getElementById('angleStart').value);
+            const angleEnd = parseFloat(document.getElementById('angleEnd').value);
+            const angleStep = parseFloat(document.getElementById('angleStep').value);
+
+            updateStatus('Measuring...');
+            document.getElementById('progressBarContainer').style.display = 'block';
+
+            let measured = 0;
+            for (let i = 0; i < state.images.length; i++) {
+                const img = state.images[i];
+                if (!img.startPoint) continue;
+
+                img.results = performRaycast(img, angleStart, angleEnd, angleStep);
+                redrawCanvas(i);
+
+                // Update preview
+                const preview = document.getElementById(`preview-${i}`);
+                preview.style.display = 'block';
+                preview.innerHTML = `<strong>Measured:</strong> ${img.results.length} points |
+                    <strong>Mean brightness:</strong> ${img.globalMean.toFixed(2)}`;
+
+                measured++;
+                const progress = (measured / imagesWithPoints.length) * 100;
+                document.getElementById('progressBar').style.width = `${progress}%`;
+            }
+
+            state.measured = true;
+            document.getElementById('progressBarContainer').style.display = 'none';
+            updateStatus(`Measurement complete. ${measured} images processed.`);
+            updateCounts();
+            updateButtons();
+        }
+
+        function performRaycast(img, angleStart, angleEnd, angleStep) {
+            const results = [];
+            const { startPoint, grayData, width, height, globalMean } = img;
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = angleStart; angle <= angleEnd; angle += angleStep) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+
+                for (let r = 1; r < maxRadius; r++) {
+                    const x = startPoint.x + r * dx;
+                    const y = startPoint.y + r * dy;
+
+                    if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+                    // Bilinear interpolation
+                    const intensity = bilinearSample(grayData, width, height, x, y);
+
+                    if (intensity > globalMean) {
+                        results.push({
+                            angle_deg: angle,
+                            r_pixels: r,
+                            x: x,
+                            y: y,
+                            value: intensity
+                        });
+                        break;
+                    }
+                }
+            }
+
+            return results;
+        }
+
+        function bilinearSample(grayData, width, height, x, y) {
+            const x0 = Math.floor(x);
+            const y0 = Math.floor(y);
+            const x1 = Math.min(x0 + 1, width - 1);
+            const y1 = Math.min(y0 + 1, height - 1);
+            const wx = x - x0;
+            const wy = y - y0;
+
+            const i00 = grayData[y0 * width + x0];
+            const i10 = grayData[y0 * width + x1];
+            const i01 = grayData[y1 * width + x0];
+            const i11 = grayData[y1 * width + x1];
+
+            return (1 - wx) * (1 - wy) * i00 +
+                   wx * (1 - wy) * i10 +
+                   (1 - wx) * wy * i01 +
+                   wx * wy * i11;
+        }
+
+        function exportToXlsx() {
+            const measuredImages = state.images.filter(img => img.results && img.results.length > 0);
+            if (measuredImages.length === 0) {
+                alert('No measurement data to export.');
+                return;
+            }
+
+            const workbook = XLSX.utils.book_new();
+
+            // Create summary sheet
+            const summaryData = [
+                ['Image Name', 'Start X', 'Start Y', 'Points Detected', 'Global Mean']
+            ];
+            for (const img of measuredImages) {
+                summaryData.push([
+                    img.name,
+                    img.startPoint.x,
+                    img.startPoint.y,
+                    img.results.length,
+                    img.globalMean.toFixed(4)
+                ]);
+            }
+            const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+            // Create individual sheets for each image
+            for (const img of measuredImages) {
+                const sheetName = sanitizeSheetName(img.name);
+                const data = [
+                    ['angle_deg', 'r_pixels', 'x_cart', 'y_cart', 'intensity']
+                ];
+
+                for (const r of img.results) {
+                    // Convert to cartesian with origin at start point
+                    const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
+                    const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
+
+                    data.push([
+                        r.angle_deg,
+                        r.r_pixels,
+                        x_cart.toFixed(4),
+                        y_cart.toFixed(4),
+                        r.value.toFixed(4)
+                    ]);
+                }
+
+                const sheet = XLSX.utils.aoa_to_sheet(data);
+                XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+            }
+
+            // Create combined data sheet
+            const combinedData = [
+                ['Image Name', 'angle_deg', 'r_pixels', 'x_cart', 'y_cart', 'intensity']
+            ];
+            for (const img of measuredImages) {
+                for (const r of img.results) {
+                    const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
+                    const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
+                    combinedData.push([
+                        img.name,
+                        r.angle_deg,
+                        r.r_pixels,
+                        x_cart.toFixed(4),
+                        y_cart.toFixed(4),
+                        r.value.toFixed(4)
+                    ]);
+                }
+            }
+            const combinedSheet = XLSX.utils.aoa_to_sheet(combinedData);
+            XLSX.utils.book_append_sheet(workbook, combinedSheet, 'All Data');
+
+            // Download
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+            XLSX.writeFile(workbook, `measurement_results_${timestamp}.xlsx`);
+
+            updateStatus('XLSX file exported successfully!');
+        }
+
+        function sanitizeSheetName(name) {
+            // Excel sheet names have limits
+            let clean = name.replace(/[\\\/\*\?\[\]:]/g, '_');
+            if (clean.length > 28) {
+                clean = clean.slice(0, 28);
+            }
+            return clean;
+        }
+
+        function clearAll() {
+            if (state.images.length > 0 && !confirm('Clear all images and data?')) {
+                return;
+            }
+
+            state.images = [];
+            state.sourceIndex = null;
+            state.measured = false;
+            document.getElementById('imageGrid').innerHTML = '';
+            updateCounts();
+            updateStatus('Cleared. Upload images to begin.');
+            updateButtons();
+        }
+
+        function updateStatus(text) {
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function updateCounts() {
+            document.getElementById('imageCount').textContent = state.images.length;
+            document.getElementById('pointCount').textContent =
+                state.images.filter(img => img.startPoint).length;
+            document.getElementById('measuredCount').textContent =
+                state.images.filter(img => img.results && img.results.length > 0).length;
+        }
+
+        function updateButtons() {
+            const hasImages = state.images.length > 0;
+            const hasSource = state.sourceIndex !== null && state.images[state.sourceIndex]?.startPoint;
+            const hasPoints = state.images.some(img => img.startPoint);
+            const hasMeasured = state.images.some(img => img.results && img.results.length > 0);
+
+            document.getElementById('propagateBtn').disabled = !hasSource || state.images.length < 2;
+            document.getElementById('measureBtn').disabled = !hasPoints;
+            document.getElementById('exportBtn').disabled = !hasMeasured;
+        }
+    </script>
+</body>
+</html>
