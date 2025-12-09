@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Batch Image Measurement Tool</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -213,8 +214,8 @@
             <button class="btn btn-success" id="measureBtn" onclick="measureAll()" disabled>
                 3. Measure All
             </button>
-            <button class="btn btn-primary" id="exportBtn" onclick="exportToXlsx()" disabled>
-                4. Export XLSX
+            <button class="btn btn-primary" id="exportBtn" onclick="exportAll()" disabled>
+                4. Export All (ZIP)
             </button>
             <button class="btn btn-danger" onclick="clearAll()">
                 Clear All
@@ -750,6 +751,138 @@
             XLSX.writeFile(workbook, `measurement_results_${timestamp}.xlsx`);
 
             updateStatus('XLSX file exported successfully!');
+        }
+
+        async function exportAll() {
+            const measuredImages = state.images.filter(img => img.results && img.results.length > 0);
+            if (measuredImages.length === 0) {
+                alert('No measurement data to export.');
+                return;
+            }
+
+            updateStatus('Preparing export files...');
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+            const zip = new JSZip();
+
+            // 1. Create JSON file (Cartesian coordinates only, no polar)
+            const jsonData = {
+                exportDate: new Date().toISOString(),
+                settings: {
+                    angleStart: parseFloat(document.getElementById('angleStart').value),
+                    angleEnd: parseFloat(document.getElementById('angleEnd').value),
+                    angleStep: parseFloat(document.getElementById('angleStep').value),
+                    rayThreshold: parseFloat(document.getElementById('rayThreshold').value)
+                },
+                images: measuredImages.map(img => ({
+                    name: img.name,
+                    startPoint: { x: img.startPoint.x, y: img.startPoint.y },
+                    globalMean: parseFloat(img.globalMean.toFixed(4)),
+                    measurements: img.results.map(r => {
+                        const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
+                        const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
+                        return {
+                            x: parseFloat(x_cart.toFixed(4)),
+                            y: parseFloat(y_cart.toFixed(4)),
+                            intensity: parseFloat(r.value.toFixed(4))
+                        };
+                    })
+                }))
+            };
+            zip.file('measurement_data.json', JSON.stringify(jsonData, null, 2));
+
+            // 2. Create XLSX file
+            const workbook = XLSX.utils.book_new();
+
+            // Summary sheet
+            const summaryData = [
+                ['Image Name', 'Start X', 'Start Y', 'Points Detected', 'Global Mean']
+            ];
+            for (const img of measuredImages) {
+                summaryData.push([
+                    img.name,
+                    img.startPoint.x,
+                    img.startPoint.y,
+                    img.results.length,
+                    img.globalMean.toFixed(4)
+                ]);
+            }
+            const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+            // Individual sheets for each image
+            for (const img of measuredImages) {
+                const sheetName = sanitizeSheetName(img.name);
+                const data = [
+                    ['angle_deg', 'r_pixels', 'x_cart', 'y_cart', 'intensity']
+                ];
+
+                for (const r of img.results) {
+                    const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
+                    const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
+
+                    data.push([
+                        r.angle_deg,
+                        r.r_pixels,
+                        x_cart.toFixed(4),
+                        y_cart.toFixed(4),
+                        r.value.toFixed(4)
+                    ]);
+                }
+
+                const sheet = XLSX.utils.aoa_to_sheet(data);
+                XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+            }
+
+            // Combined data sheet
+            const combinedData = [
+                ['Image Name', 'angle_deg', 'r_pixels', 'x_cart', 'y_cart', 'intensity']
+            ];
+            for (const img of measuredImages) {
+                for (const r of img.results) {
+                    const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
+                    const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
+                    combinedData.push([
+                        img.name,
+                        r.angle_deg,
+                        r.r_pixels,
+                        x_cart.toFixed(4),
+                        y_cart.toFixed(4),
+                        r.value.toFixed(4)
+                    ]);
+                }
+            }
+            const combinedSheet = XLSX.utils.aoa_to_sheet(combinedData);
+            XLSX.utils.book_append_sheet(workbook, combinedSheet, 'All Data');
+
+            const xlsxData = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+            zip.file('measurement_data.xlsx', xlsxData);
+
+            // 3. Export images with rays
+            const imagesFolder = zip.folder('images');
+            for (let i = 0; i < state.images.length; i++) {
+                const img = state.images[i];
+                if (!img.results || img.results.length === 0) continue;
+
+                // Canvas already has the rays drawn, convert to PNG
+                const dataUrl = img.canvas.toDataURL('image/png');
+                const base64Data = dataUrl.split(',')[1];
+                const imageName = img.name.replace(/\.[^/.]+$/, '') + '_with_rays.png';
+                imagesFolder.file(imageName, base64Data, { base64: true });
+            }
+
+            // Generate and download ZIP
+            updateStatus('Generating ZIP file...');
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const downloadUrl = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = `measurement_export_${timestamp}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(downloadUrl);
+
+            updateStatus('Export complete! ZIP file downloaded with JSON, XLSX, and images.');
         }
 
         function sanitizeSheetName(name) {
