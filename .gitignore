@@ -1,0 +1,58 @@
+# --- Python Core ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual Environments (가상환경) ---
+# 다양한 가상환경 폴더 이름을 모두 커버
+venv/
+env/
+.env
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Environment Variables & Secrets (중요: 보안) ---
+.env
+.env.local
+.env.*.local
+# 예외: .env.example은 템플릿용으로 커밋하고 싶다면 아래 주석 해제
+# !.env.example
+
+# --- Claude & AI Tools ---
+# Claude 설정, 히스토리, 세션 키 등이 저장될 수 있는 폴더
+.claude/
+.anthropic/
+# 실수로 생성될 수 있는 API Key 파일들
+*api_key*
+*apikey*
+*.pem
+
+# --- GitHub Codespaces & VS Code ---
+.vscode/
+# !.vscode/extensions.json # 팀원 추천 확장프로그램 공유 시 주석 해제
+# !.vscode/settings.json   # 팀 공통 설정 공유 시 주석 해제
+# 주의: .devcontainer/ 폴더는 Codespace 설정을 위해 커밋해야 하므로 여기 적지 않습니다.
+
+# --- HTML/Web Development Artifacts ---
+# 빌드 결과물이나 임시 파일 (필요시)
+dist/
+build/
+.DS_Store
+
+# --- Logs & Databases ---
+*.log
+*.sqlite3
+
+# --- Testing & Coverage ---
+.coverage
+htmlcov/
+.pytest_cache/
+
+
+# --- Data
+data/*
+
+# --- exclude.structure
+!data/.gitkeep

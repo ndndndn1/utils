@@ -242,10 +242,73 @@
                 <span class="template-size-info">Used for propagation matching</span>
             </div>
             <div class="setting-row">
-                <label>Ray Threshold:</label>
-                <input type="number" id="rayThreshold" value="1.00" min="0.01" max="5.00" step="0.01">
-                <span class="template-size-info">Stop when intensity > mean × threshold (default: 1.00)</span>
+                <label>Detection Mode:</label>
+                <select id="detectionMode" style="padding: 5px 10px; border: 1px solid #333; border-radius: 5px; background: #1a1a2e; color: #eee; width: 180px;">
+                    <option value="ray">Ray (Threshold)</option>
+                    <option value="canny">Canny Edge Detection</option>
+                    <option value="adaptive">Adaptive Threshold</option>
+                </select>
             </div>
+
+            <!-- Ray Settings -->
+            <div id="raySettings">
+                <div class="setting-row">
+                    <label>Ray Threshold:</label>
+                    <input type="number" id="rayThreshold" value="1.00" min="0.01" max="5.00" step="0.01">
+                    <span class="template-size-info">Stop when intensity > mean × threshold (default: 1.00)</span>
+                </div>
+            </div>
+
+            <!-- Canny Settings -->
+            <div id="cannySettings" style="display: none;">
+                <div class="setting-row">
+                    <label>Gaussian Sigma:</label>
+                    <input type="number" id="gaussianSigma" value="1.4" min="0.5" max="5.0" step="0.1">
+                    <span class="template-size-info">Blur strength (1.0-2.0 typical)</span>
+                </div>
+                <div class="setting-row">
+                    <label>Low Threshold:</label>
+                    <input type="number" id="cannyLowThreshold" value="20" min="1" max="100">
+                    <span class="template-size-info">Weak edge threshold</span>
+                </div>
+                <div class="setting-row">
+                    <label>High Threshold:</label>
+                    <input type="number" id="cannyHighThreshold" value="50" min="1" max="255">
+                    <span class="template-size-info">Strong edge threshold</span>
+                </div>
+            </div>
+
+            <!-- Adaptive Settings -->
+            <div id="adaptiveSettings" style="display: none;">
+                <div class="setting-row">
+                    <label>Block Size (px):</label>
+                    <input type="number" id="adaptiveBlockSize" value="31" min="3" max="101" step="2">
+                    <span class="template-size-info">Must be odd (21-51 recommended)</span>
+                </div>
+                <div class="setting-row">
+                    <label>Threshold Constant (C):</label>
+                    <input type="number" id="adaptiveC" value="10" min="-50" max="50" step="1">
+                    <span class="template-size-info">Higher = more sensitive to edges</span>
+                </div>
+            </div>
+
+            <!-- Common Options -->
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #333;">
+                <div class="setting-row">
+                    <label><input type="checkbox" id="showEdgeOverlay" style="width: auto; margin-right: 5px;"> Show Edge Map Overlay</label>
+                    <span class="template-size-info">Visualize detected edges (Canny/Adaptive only)</span>
+                </div>
+                <div class="setting-row">
+                    <label><input type="checkbox" id="enableSmoothing" style="width: auto; margin-right: 5px;"> Enable Result Smoothing</label>
+                    <span class="template-size-info">Median filter to reduce outliers</span>
+                </div>
+                <div class="setting-row" id="smoothingWindowRow" style="display: none;">
+                    <label>Smoothing Window:</label>
+                    <input type="number" id="smoothingWindow" value="5" min="3" max="21" step="2">
+                    <span class="template-size-info">Odd number (3-21)</span>
+                </div>
+            </div>
+
             <p class="help-text">
                 Click on an image to set the measurement start point.
                 Then click "Propagate" to find similar points in other images.
@@ -268,6 +331,49 @@
 
         // Ray threshold change handler - re-measure when threshold changes
         document.getElementById('rayThreshold').addEventListener('change', function() {
+            if (state.measured && state.images.some(img => img.startPoint)) {
+                measureAll();
+            }
+        });
+
+        // Detection mode change handler
+        document.getElementById('detectionMode').addEventListener('change', function() {
+            const mode = this.value;
+            document.getElementById('raySettings').style.display = mode === 'ray' ? 'block' : 'none';
+            document.getElementById('cannySettings').style.display = mode === 'canny' ? 'block' : 'none';
+            document.getElementById('adaptiveSettings').style.display = mode === 'adaptive' ? 'block' : 'none';
+
+            if (state.measured && state.images.some(img => img.startPoint)) {
+                measureAll();
+            }
+        });
+
+        // Canny/Adaptive parameter change handlers
+        ['gaussianSigma', 'cannyLowThreshold', 'cannyHighThreshold', 'adaptiveBlockSize', 'adaptiveC'].forEach(id => {
+            document.getElementById(id).addEventListener('change', function() {
+                if (state.measured && state.images.some(img => img.startPoint)) {
+                    measureAll();
+                }
+            });
+        });
+
+        // Edge overlay toggle handler
+        document.getElementById('showEdgeOverlay').addEventListener('change', function() {
+            state.images.forEach((img, i) => {
+                if (img.startPoint) redrawCanvas(i);
+            });
+        });
+
+        // Smoothing toggle handler
+        document.getElementById('enableSmoothing').addEventListener('change', function() {
+            document.getElementById('smoothingWindowRow').style.display = this.checked ? 'flex' : 'none';
+            if (state.measured && state.images.some(img => img.startPoint)) {
+                measureAll();
+            }
+        });
+
+        // Smoothing window change handler
+        document.getElementById('smoothingWindow').addEventListener('change', function() {
             if (state.measured && state.images.some(img => img.startPoint)) {
                 measureAll();
             }
@@ -404,6 +510,12 @@
 
             // Clear and redraw image
             ctx.drawImage(img.element, 0, 0);
+
+            // Draw edge overlay if enabled and available
+            const showEdgeOverlay = document.getElementById('showEdgeOverlay').checked;
+            if (showEdgeOverlay && img.edgeMap) {
+                drawEdgeOverlay(ctx, img.edgeMap, img.width, img.height);
+            }
 
             // Draw start point if exists
             if (img.startPoint) {
@@ -586,9 +698,21 @@
             const angleStart = parseFloat(document.getElementById('angleStart').value);
             const angleEnd = parseFloat(document.getElementById('angleEnd').value);
             const angleStep = parseFloat(document.getElementById('angleStep').value);
-            const rayThreshold = parseFloat(document.getElementById('rayThreshold').value);
+            const detectionMode = document.getElementById('detectionMode').value;
 
-            updateStatus('Measuring...');
+            // Mode-specific settings
+            const rayThreshold = parseFloat(document.getElementById('rayThreshold').value);
+            const gaussianSigma = parseFloat(document.getElementById('gaussianSigma').value);
+            const cannyLowThreshold = parseFloat(document.getElementById('cannyLowThreshold').value);
+            const cannyHighThreshold = parseFloat(document.getElementById('cannyHighThreshold').value);
+            const adaptiveBlockSize = parseInt(document.getElementById('adaptiveBlockSize').value);
+            const adaptiveC = parseFloat(document.getElementById('adaptiveC').value);
+
+            // Smoothing settings
+            const enableSmoothing = document.getElementById('enableSmoothing').checked;
+            const smoothingWindow = parseInt(document.getElementById('smoothingWindow').value);
+
+            updateStatus(`Measuring with ${detectionMode} mode...`);
             document.getElementById('progressBarContainer').style.display = 'block';
 
             let measured = 0;
@@ -596,23 +720,56 @@
                 const img = state.images[i];
                 if (!img.startPoint) continue;
 
-                img.results = performRaycast(img, angleStart, angleEnd, angleStep, rayThreshold);
+                // Clear previous edge map
+                img.edgeMap = null;
+
+                // Perform detection based on mode
+                let results;
+                switch (detectionMode) {
+                    case 'ray':
+                        results = performRaycast(img, angleStart, angleEnd, angleStep, rayThreshold);
+                        break;
+                    case 'canny':
+                        results = performCannyDetection(img, angleStart, angleEnd, angleStep,
+                            gaussianSigma, cannyLowThreshold, cannyHighThreshold);
+                        break;
+                    case 'adaptive':
+                        results = performAdaptiveDetection(img, angleStart, angleEnd, angleStep,
+                            adaptiveBlockSize, adaptiveC);
+                        break;
+                    default:
+                        results = performRaycast(img, angleStart, angleEnd, angleStep, rayThreshold);
+                }
+
+                // Apply smoothing if enabled
+                if (enableSmoothing && results.length >= smoothingWindow) {
+                    results = smoothContourResults(results, img.startPoint.x, img.startPoint.y, smoothingWindow);
+                }
+
+                img.results = results;
+                img.detectionMode = detectionMode; // Store which mode was used
                 redrawCanvas(i);
 
                 // Update preview
                 const preview = document.getElementById(`preview-${i}`);
                 preview.style.display = 'block';
-                preview.innerHTML = `<strong>Measured:</strong> ${img.results.length} points |
+                const modeLabel = detectionMode.charAt(0).toUpperCase() + detectionMode.slice(1);
+                preview.innerHTML = `<strong>Mode:</strong> ${modeLabel} |
+                    <strong>Measured:</strong> ${img.results.length} points |
                     <strong>Mean brightness:</strong> ${img.globalMean.toFixed(2)}`;
 
                 measured++;
                 const progress = (measured / imagesWithPoints.length) * 100;
                 document.getElementById('progressBar').style.width = `${progress}%`;
+
+                // Yield to UI for responsiveness
+                await new Promise(resolve => setTimeout(resolve, 0));
             }
 
             state.measured = true;
+            state.detectionMode = detectionMode; // Store current mode in state
             document.getElementById('progressBarContainer').style.display = 'none';
-            updateStatus(`Measurement complete. ${measured} images processed.`);
+            updateStatus(`Measurement complete. ${measured} images processed using ${detectionMode} mode.`);
             updateCounts();
             updateButtons();
         }
@@ -673,6 +830,436 @@
                    wx * (1 - wy) * i10 +
                    (1 - wx) * wy * i01 +
                    wx * wy * i11;
+        }
+
+        // ============================================
+        // CANNY EDGE DETECTION ALGORITHM
+        // ============================================
+
+        function generateGaussianKernel(sigma) {
+            let size = Math.ceil(sigma * 6) | 1;
+            if (size < 3) size = 3;
+
+            const kernel = [];
+            const center = Math.floor(size / 2);
+            let sum = 0;
+
+            for (let y = 0; y < size; y++) {
+                const row = [];
+                for (let x = 0; x < size; x++) {
+                    const dx = x - center;
+                    const dy = y - center;
+                    const value = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+                    row.push(value);
+                    sum += value;
+                }
+                kernel.push(row);
+            }
+
+            // Normalize
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    kernel[y][x] /= sum;
+                }
+            }
+            return kernel;
+        }
+
+        function applyGaussianBlur(grayData, width, height, sigma) {
+            const kernel = generateGaussianKernel(sigma);
+            const kSize = kernel.length;
+            const kHalf = Math.floor(kSize / 2);
+            const result = new Float32Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let sum = 0;
+                    let weightSum = 0;
+
+                    for (let ky = 0; ky < kSize; ky++) {
+                        for (let kx = 0; kx < kSize; kx++) {
+                            const px = x + kx - kHalf;
+                            const py = y + ky - kHalf;
+
+                            if (px >= 0 && px < width && py >= 0 && py < height) {
+                                const weight = kernel[ky][kx];
+                                sum += grayData[py * width + px] * weight;
+                                weightSum += weight;
+                            }
+                        }
+                    }
+                    result[y * width + x] = sum / weightSum;
+                }
+            }
+            return result;
+        }
+
+        function computeGradients(blurredData, width, height) {
+            const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+            const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+
+            const gradientMagnitude = new Float32Array(width * height);
+            const gradientDirection = new Float32Array(width * height);
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let gx = 0, gy = 0;
+
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const pixel = blurredData[(y + ky) * width + (x + kx)];
+                            gx += pixel * sobelX[ky + 1][kx + 1];
+                            gy += pixel * sobelY[ky + 1][kx + 1];
+                        }
+                    }
+
+                    const idx = y * width + x;
+                    gradientMagnitude[idx] = Math.sqrt(gx * gx + gy * gy);
+                    gradientDirection[idx] = Math.atan2(gy, gx);
+                }
+            }
+            return { gradientMagnitude, gradientDirection };
+        }
+
+        function nonMaximumSuppression(gradientMagnitude, gradientDirection, width, height) {
+            const result = new Float32Array(width * height);
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    const magnitude = gradientMagnitude[idx];
+                    if (magnitude === 0) continue;
+
+                    let angle = gradientDirection[idx] * 180 / Math.PI;
+                    if (angle < 0) angle += 180;
+
+                    let neighbor1, neighbor2;
+
+                    if ((angle >= 0 && angle < 22.5) || (angle >= 157.5 && angle <= 180)) {
+                        neighbor1 = gradientMagnitude[y * width + (x - 1)];
+                        neighbor2 = gradientMagnitude[y * width + (x + 1)];
+                    } else if (angle >= 22.5 && angle < 67.5) {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + (x + 1)];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + (x - 1)];
+                    } else if (angle >= 67.5 && angle < 112.5) {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + x];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + x];
+                    } else {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + (x - 1)];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + (x + 1)];
+                    }
+
+                    if (magnitude >= neighbor1 && magnitude >= neighbor2) {
+                        result[idx] = magnitude;
+                    }
+                }
+            }
+            return result;
+        }
+
+        function hysteresisThreshold(suppressedData, width, height, lowThreshold, highThreshold) {
+            const edges = new Uint8Array(width * height);
+            const WEAK = 128;
+            const STRONG = 255;
+
+            // First pass: classify pixels
+            for (let i = 0; i < suppressedData.length; i++) {
+                if (suppressedData[i] >= highThreshold) {
+                    edges[i] = STRONG;
+                } else if (suppressedData[i] >= lowThreshold) {
+                    edges[i] = WEAK;
+                }
+            }
+
+            // Second pass: connect weak edges to strong using BFS
+            const queue = [];
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    if (edges[y * width + x] === STRONG) {
+                        queue.push({ x, y });
+                    }
+                }
+            }
+
+            while (queue.length > 0) {
+                const { x, y } = queue.shift();
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const nIdx = ny * width + nx;
+                            if (edges[nIdx] === WEAK) {
+                                edges[nIdx] = STRONG;
+                                queue.push({ x: nx, y: ny });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Remove remaining weak edges
+            for (let i = 0; i < edges.length; i++) {
+                if (edges[i] !== STRONG) edges[i] = 0;
+            }
+            return edges;
+        }
+
+        function performCannyEdgeDetection(grayData, width, height, sigma, lowThreshold, highThreshold) {
+            const blurred = applyGaussianBlur(grayData, width, height, sigma);
+            const { gradientMagnitude, gradientDirection } = computeGradients(blurred, width, height);
+            const suppressed = nonMaximumSuppression(gradientMagnitude, gradientDirection, width, height);
+            const edges = hysteresisThreshold(suppressed, width, height, lowThreshold, highThreshold);
+            return edges;
+        }
+
+        function findFirstEdgeAlongRay(edgeMap, grayData, width, height, startX, startY, angle, maxRadius) {
+            const rad = angle * Math.PI / 180;
+            const dx = Math.cos(rad);
+            const dy = Math.sin(rad);
+
+            for (let r = 1; r < maxRadius; r++) {
+                const x = Math.round(startX + r * dx);
+                const y = Math.round(startY + r * dy);
+
+                if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) break;
+
+                const idx = y * width + x;
+                if (edgeMap[idx] === 255) {
+                    // Verify dark-to-bright transition
+                    const checkDist = 3;
+                    const beforeR = r - checkDist;
+                    const afterR = r + checkDist;
+
+                    if (beforeR > 0 && afterR < maxRadius) {
+                        const beforeX = Math.round(startX + beforeR * dx);
+                        const beforeY = Math.round(startY + beforeR * dy);
+                        const afterX = Math.round(startX + afterR * dx);
+                        const afterY = Math.round(startY + afterR * dy);
+
+                        if (beforeX >= 0 && beforeX < width && beforeY >= 0 && beforeY < height &&
+                            afterX >= 0 && afterX < width && afterY >= 0 && afterY < height) {
+                            const intensityBefore = grayData[beforeY * width + beforeX];
+                            const intensityAfter = grayData[afterY * width + afterX];
+
+                            // We want dark-to-bright transition
+                            if (intensityAfter > intensityBefore) {
+                                return {
+                                    r_pixels: r,
+                                    x: startX + r * dx,
+                                    y: startY + r * dy,
+                                    value: grayData[idx]
+                                };
+                            }
+                            continue; // Skip bright-to-dark transitions
+                        }
+                    }
+
+                    // Fallback: accept first edge if can't verify
+                    return {
+                        r_pixels: r,
+                        x: startX + r * dx,
+                        y: startY + r * dy,
+                        value: grayData[idx]
+                    };
+                }
+            }
+            return null;
+        }
+
+        function performCannyDetection(img, angleStart, angleEnd, angleStep, sigma, lowThreshold, highThreshold) {
+            const results = [];
+            const { startPoint, grayData, width, height } = img;
+
+            const edgeMap = performCannyEdgeDetection(grayData, width, height, sigma, lowThreshold, highThreshold);
+            img.edgeMap = edgeMap; // Cache for visualization
+
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = angleStart; angle <= angleEnd; angle += angleStep) {
+                const edgePoint = findFirstEdgeAlongRay(
+                    edgeMap, grayData, width, height,
+                    startPoint.x, startPoint.y, angle, maxRadius
+                );
+
+                if (edgePoint) {
+                    results.push({
+                        angle_deg: angle,
+                        r_pixels: edgePoint.r_pixels,
+                        x: edgePoint.x,
+                        y: edgePoint.y,
+                        value: edgePoint.value
+                    });
+                }
+            }
+            return results;
+        }
+
+        // ============================================
+        // ADAPTIVE THRESHOLD ALGORITHM
+        // ============================================
+
+        function computeIntegralImage(grayData, width, height) {
+            const integral = new Float64Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                let rowSum = 0;
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    rowSum += grayData[idx];
+                    integral[idx] = rowSum + (y > 0 ? integral[(y - 1) * width + x] : 0);
+                }
+            }
+            return integral;
+        }
+
+        function getLocalMean(integral, width, height, x, y, blockRadius) {
+            const x1 = Math.max(0, x - blockRadius);
+            const y1 = Math.max(0, y - blockRadius);
+            const x2 = Math.min(width - 1, x + blockRadius);
+            const y2 = Math.min(height - 1, y + blockRadius);
+
+            const A = (y1 > 0 && x1 > 0) ? integral[(y1 - 1) * width + (x1 - 1)] : 0;
+            const B = (y1 > 0) ? integral[(y1 - 1) * width + x2] : 0;
+            const C = (x1 > 0) ? integral[y2 * width + (x1 - 1)] : 0;
+            const D = integral[y2 * width + x2];
+
+            const sum = D - B - C + A;
+            const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+            return sum / count;
+        }
+
+        function computeAdaptiveBinary(grayData, integral, width, height, blockSize, C) {
+            const blockRadius = Math.floor(blockSize / 2);
+            const binary = new Uint8Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    const localMean = getLocalMean(integral, width, height, x, y, blockRadius);
+                    const threshold = localMean - C;
+                    binary[idx] = grayData[idx] > threshold ? 255 : 0;
+                }
+            }
+            return binary;
+        }
+
+        function findInnerEdge(binary, grayData, width, height, startX, startY, angle) {
+            const rad = angle * Math.PI / 180;
+            const dx = Math.cos(rad);
+            const dy = Math.sin(rad);
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startX, width - startX),
+                Math.max(startY, height - startY)
+            ));
+
+            let prevVal = binary[Math.round(startY) * width + Math.round(startX)];
+
+            for (let r = 1; r < maxRadius; r++) {
+                const x = Math.round(startX + r * dx);
+                const y = Math.round(startY + r * dy);
+
+                if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+                const currVal = binary[y * width + x];
+
+                // Transition from dark (0) to white (255) = inner edge of border
+                if (prevVal === 0 && currVal === 255) {
+                    return {
+                        r_pixels: r,
+                        x: startX + r * dx,
+                        y: startY + r * dy,
+                        value: grayData[y * width + x]
+                    };
+                }
+                prevVal = currVal;
+            }
+            return null;
+        }
+
+        function performAdaptiveDetection(img, angleStart, angleEnd, angleStep, blockSize, thresholdC) {
+            const results = [];
+            const { startPoint, grayData, width, height } = img;
+
+            const integral = computeIntegralImage(grayData, width, height);
+            const binary = computeAdaptiveBinary(grayData, integral, width, height, blockSize, thresholdC);
+            img.edgeMap = binary; // Cache for visualization (reuse edgeMap field)
+
+            for (let angle = angleStart; angle <= angleEnd; angle += angleStep) {
+                const edgePoint = findInnerEdge(
+                    binary, grayData, width, height,
+                    startPoint.x, startPoint.y, angle
+                );
+
+                if (edgePoint) {
+                    results.push({
+                        angle_deg: angle,
+                        r_pixels: edgePoint.r_pixels,
+                        x: edgePoint.x,
+                        y: edgePoint.y,
+                        value: edgePoint.value
+                    });
+                }
+            }
+            return results;
+        }
+
+        // ============================================
+        // SMOOTHING (MEDIAN FILTER)
+        // ============================================
+
+        function smoothContourResults(results, startX, startY, windowSize) {
+            if (results.length < windowSize) return results;
+
+            const smoothed = [];
+            const halfWindow = Math.floor(windowSize / 2);
+
+            for (let i = 0; i < results.length; i++) {
+                const windowVals = [];
+                for (let j = -halfWindow; j <= halfWindow; j++) {
+                    const idx = Math.max(0, Math.min(results.length - 1, i + j));
+                    windowVals.push(results[idx].r_pixels);
+                }
+
+                windowVals.sort((a, b) => a - b);
+                const medianR = windowVals[Math.floor(windowVals.length / 2)];
+
+                const angle = results[i].angle_deg;
+                const rad = angle * Math.PI / 180;
+
+                smoothed.push({
+                    angle_deg: angle,
+                    r_pixels: medianR,
+                    x: startX + medianR * Math.cos(rad),
+                    y: startY + medianR * Math.sin(rad),
+                    value: results[i].value
+                });
+            }
+            return smoothed;
+        }
+
+        // ============================================
+        // EDGE OVERLAY VISUALIZATION
+        // ============================================
+
+        function drawEdgeOverlay(ctx, edgeMap, width, height) {
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+
+            for (let i = 0; i < edgeMap.length; i++) {
+                if (edgeMap[i] === 255) {
+                    const idx = i * 4;
+                    // Green overlay for edges
+                    data[idx] = Math.max(0, data[idx] - 50);
+                    data[idx + 1] = Math.min(255, data[idx + 1] + 150);
+                    data[idx + 2] = Math.max(0, data[idx + 2] - 50);
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
         }
 
         function exportToXlsx() {
@@ -764,19 +1351,43 @@
             const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
             const zip = new JSZip();
 
+            // Get current settings
+            const detectionMode = document.getElementById('detectionMode').value;
+            const enableSmoothing = document.getElementById('enableSmoothing').checked;
+
+            // Build mode-specific settings
+            const modeSettings = {};
+            if (detectionMode === 'ray') {
+                modeSettings.rayThreshold = parseFloat(document.getElementById('rayThreshold').value);
+            } else if (detectionMode === 'canny') {
+                modeSettings.gaussianSigma = parseFloat(document.getElementById('gaussianSigma').value);
+                modeSettings.lowThreshold = parseFloat(document.getElementById('cannyLowThreshold').value);
+                modeSettings.highThreshold = parseFloat(document.getElementById('cannyHighThreshold').value);
+            } else if (detectionMode === 'adaptive') {
+                modeSettings.blockSize = parseInt(document.getElementById('adaptiveBlockSize').value);
+                modeSettings.thresholdC = parseFloat(document.getElementById('adaptiveC').value);
+            }
+
+            if (enableSmoothing) {
+                modeSettings.smoothingWindow = parseInt(document.getElementById('smoothingWindow').value);
+            }
+
             // 1. Create JSON file (Cartesian coordinates only, no polar)
             const jsonData = {
                 exportDate: new Date().toISOString(),
+                detectionMode: detectionMode,
                 settings: {
                     angleStart: parseFloat(document.getElementById('angleStart').value),
                     angleEnd: parseFloat(document.getElementById('angleEnd').value),
                     angleStep: parseFloat(document.getElementById('angleStep').value),
-                    rayThreshold: parseFloat(document.getElementById('rayThreshold').value)
+                    smoothingEnabled: enableSmoothing,
+                    ...modeSettings
                 },
                 images: measuredImages.map(img => ({
                     name: img.name,
                     startPoint: { x: img.startPoint.x, y: img.startPoint.y },
                     globalMean: parseFloat(img.globalMean.toFixed(4)),
+                    detectionMode: img.detectionMode || detectionMode,
                     measurements: img.results.map(r => {
                         const x_cart = r.r_pixels * Math.cos(r.angle_deg * Math.PI / 180);
                         const y_cart = r.r_pixels * Math.sin(r.angle_deg * Math.PI / 180);
@@ -795,7 +1406,7 @@
 
             // Summary sheet
             const summaryData = [
-                ['Image Name', 'Start X', 'Start Y', 'Points Detected', 'Global Mean']
+                ['Image Name', 'Start X', 'Start Y', 'Points Detected', 'Global Mean', 'Detection Mode']
             ];
             for (const img of measuredImages) {
                 summaryData.push([
@@ -803,7 +1414,8 @@
                     img.startPoint.x,
                     img.startPoint.y,
                     img.results.length,
-                    img.globalMean.toFixed(4)
+                    img.globalMean.toFixed(4),
+                    img.detectionMode || detectionMode
                 ]);
             }
             const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
