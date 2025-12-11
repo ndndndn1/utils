@@ -4,7 +4,7 @@ data 폴더 내에 있는 이미지에 있는 trench 형상을 학습하여 모�
 파악합니다. 그래픽 리소스는 cloudfalre workers 활용. 기존 파일과 별개의 html로 작성. 파악한 형상 직교좌표 
 export(JSON, xlsx, 원본 image)
 
-## require
+## review
 Trench 형상 학습 모델은 어떤 방식을 원하시나요?
 
   1. 통계적 모델링
@@ -351,3 +351,257 @@ Cloudflare Workers에서 GPU 서버리스 API를 호스팅하려면 실제 Worke
 
   1. Training Mode에서 이미지 로드 → 시작점 클릭 → Extract Boundaries → Build Models
   2. Detection Mode에서 새 이미지 로드 → 시작점 클릭 → Detect Buckets → Export Results
+
+## Q
+trench-bucket-scanner.html 에서 Detect Buckets 후 값을 바꿨을 때 인식한 edge 좌표를 시각적으로 보여주세요
+  training Mode 에서 build 하면 model이 자동으로 load 된 것이라면, 상단에 어느 모델인지 표시해주세요. 혹은 현재
+  Detection Mode는 아무런 모델 로드 및 학습 없이 진행 가능한 상태인가요. 그렇다면 학습모델을 로드하는 기능도
+  추가해주세요
+
+### review
+● Edge 좌표 표시 방식을 어떻게 원하시나요?
+   → 캔버스에 직접 표시
+ ● 파라미터 변경 시 자동 재측정을 원하시나요?
+   → 자동 재측정 (Recommended)
+
+### A
+구현 계획 요약
+
+  변경 사항
+
+  1. Detection Mode에 Load Models 버튼 추가
+    - 현재는 Training Mode에서만 모델 로드 가능
+    - Detection Mode에서도 바로 모델 로드 가능하도록 버튼 추가
+  2. 모델 상태/소스 표시
+    - 상단에 현재 로드된 모델 정보 표시
+    - "Built from training" 또는 "Loaded: filename.json" 형태로 표시
+  3. 파라미터 변경 시 자동 재측정
+    - 파라미터 변경 이벤트 리스너 추가
+    - Detection 결과가 있을 때 자동으로 detectAll() 재실행
+  4. Edge 좌표 캔버스에 직접 표시
+    - 필터링된 edge 포인트에 상대 좌표 (x, y) 라벨 표시
+    - 12개 정도 간격으로 표시 (너무 밀집되지 않도록)
+    - 노란색 텍스트로 가독성 확보
+
+  모든 변경은 trench-bucket-scanner.html 단일 파일에서 이루어집니다.
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Trench Bucket Scanner Enhancement Plan
+
+ User Requests (Confirmed)
+
+ 1. Edge 좌표 시각적 표시: Detect Buckets 후 파라미터 값을 변경했을 때 인식한 edge 좌표를 캔버스에 직접 표시
+ 2. 자동 재측정: 파라미터 변경 시 자동으로 재측정하여 결과 업데이트
+ 3. 모델 상태 표시: Training Mode에서 build하면 어느 모델인지 상단에 표시
+ 4. 모델 로드 기능: Detection Mode에서 학습 모델을 로드하는 기능 추가
+
+ ---
+ Current State Analysis
+
+ Detection Mode 모델 의존성
+
+ - 현재 상태: Detection Mode는 모델 없이 동작 불가
+ - 라인 1654: document.getElementById('detectBtn').disabled = !hasDetectionPoints || !hasModels;
+ - 즉, Statistical 또는 Template 모델이 있어야 Detect 버튼 활성화
+
+ 기존 모델 로드 기능
+
+ - Training Mode에만 Load Models 버튼 존재 (라인 327-329)
+ - Detection Mode에는 로드 기능 없음
+
+ 파라미터 변경 시 자동 재측정
+
+ - 현재: 자동 재측정 없음 - 수동으로 Detect 버튼 클릭 필요
+
+ ---
+ Implementation Plan
+
+ 1. Detection Mode에 Load Models 버튼 추가
+
+ 위치: trench-bucket-scanner.html 라인 336-350
+
+ <!-- Detection Mode Controls에 추가 -->
+ <button class="btn btn-secondary" onclick="loadModels()">
+     Load Models
+ </button>
+
+ ---
+ 2. 모델 상태/소스 표시 기능
+
+ 2.1 HTML 수정 (라인 302-306 근처)
+ - 모델 소스 표시 영역 추가: "Built from training" vs "Loaded: filename.json"
+
+ 2.2 state 객체 확장 (라인 485-498)
+ state.trainingData.modelSource = null;    // 'built' | 'loaded'
+ state.trainingData.loadedFileName = null;
+
+ 2.3 buildModels() 수정 (라인 1215)
+ - modelSource = 'built' 설정
+ - 상단 UI 업데이트
+
+ 2.4 loadModels() 수정 (라인 1585)
+ - modelSource = 'loaded' 설정
+ - loadedFileName 저장
+ - 상단 UI 업데이트
+
+ 2.5 updateModelSourceDisplay() 함수 추가
+ function updateModelSourceDisplay() {
+     const el = document.getElementById('modelSourceInfo');
+     if (state.trainingData.modelSource === 'built') {
+         el.textContent = 'Model: Built from training';
+         el.className = 'model-source built';
+     } else if (state.trainingData.modelSource === 'loaded') {
+         el.textContent = `Model: ${state.trainingData.loadedFileName}`;
+         el.className = 'model-source loaded';
+     } else {
+         el.textContent = 'Model: None';
+         el.className = 'model-source none';
+     }
+ }
+
+ ---
+ 3. 파라미터 변경 시 자동 재측정
+
+ 3.1 setupParameterListeners() 함수 추가
+ function setupParameterListeners() {
+     const params = [
+         'directionAngle', 'scanRange', 'angleStep',
+         'sigmaThreshold', 'matchThreshold',
+         'fftCutoff', 'maxDerivative',
+         'ransacIterations', 'ransacThreshold', 'polyDegree'
+     ];
+
+     params.forEach(id => {
+         const el = document.getElementById(id);
+         if (el) {
+             el.addEventListener('change', () => {
+                 const hasResults = state.images.some(
+                     img => img.mode === 'detection' && img.filteredBoundary?.length > 0
+                 );
+                 if (hasResults) {
+                     detectAll();
+                 }
+             });
+         }
+     });
+ }
+
+ 3.2 초기화 시 호출
+ - 스크립트 끝에 setupParameterListeners() 호출 추가
+
+ ---
+ 4. Edge 좌표 캔버스에 직접 표시
+
+ 4.1 redrawCanvas() 함수 수정 (라인 697-756)
+ - 필터링된 boundary 점에 좌표 라벨 표시
+ - 너무 밀집된 경우 N번째 점마다 표시 (간격 조절)
+
+ // redrawCanvas() 내 filteredBoundary 표시 부분 확장
+ if (img.filteredBoundary && img.filteredBoundary.length > 0) {
+     // 기존 선 그리기 유지
+     ctx.strokeStyle = 'rgba(0, 217, 255, 0.8)';
+     ctx.lineWidth = 2;
+     ctx.beginPath();
+     ctx.moveTo(img.filteredBoundary[0].x, img.filteredBoundary[0].y);
+     for (let i = 1; i < img.filteredBoundary.length; i++) {
+         ctx.lineTo(img.filteredBoundary[i].x, img.filteredBoundary[i].y);
+     }
+     ctx.stroke();
+
+     // 좌표 라벨 표시 (10~15도 간격마다)
+     const labelInterval = Math.max(1, Math.floor(img.filteredBoundary.length / 12));
+     ctx.font = '10px monospace';
+     ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+     for (let i = 0; i < img.filteredBoundary.length; i += labelInterval) {
+         const p = img.filteredBoundary[i];
+         const relX = (p.x - img.startPoint.x).toFixed(1);
+         const relY = (p.y - img.startPoint.y).toFixed(1);
+         ctx.fillText(`(${relX},${relY})`, p.x + 5, p.y - 5);
+     }
+ }
+
+ ---
+ Files to Modify
+
+ | File                       | Location              |
+ |----------------------------|-----------------------|
+ | trench-bucket-scanner.html | 모든 변경 (단일 파일) |
+
+ ---
+ Implementation Order
+
+ 1. Detection Mode Load Models 버튼 (라인 346 근처)
+ 2. 모델 소스 표시 UI (라인 302-310, CSS 추가)
+ 3. state 객체 확장 (라인 489-496)
+ 4. buildModels() 수정 (라인 1264 근처)
+ 5. loadModels() 수정 (라인 1608 근처)
+ 6. updateModelSourceDisplay() 함수 추가
+ 7. setupParameterListeners() 함수 추가
+ 8. redrawCanvas() 좌표 표시 확장 (라인 744 근처)
+ 9. 초기화 코드 추가
+
+### mod.Q
+8. redrawCanvas() boundary 포인트에 노란색 점만 표시
+
+### mod.A
+수정 내용 요약:
+  - redrawCanvas() 함수에서 좌표 텍스트 라벨 (x, y) 대신 노란색 점(반지름 4px)만 표시하도록 변경
+  - 위치: trench-bucket-scanner.html 라인 780-794
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Trench Bucket Scanner Enhancement Plan
+
+ 수정 요청
+
+ Edge 좌표 표시 방식 변경: 현재 좌표 텍스트 라벨 대신 노란색 점(dot)만 표시하도록 변경
+
+ ---
+ 현재 상태 (라인 780-794)
+
+ 현재 redrawCanvas() 함수에서 좌표 텍스트 라벨을 표시:
+ // Draw coordinate labels on filtered boundary points
+ const labelInterval = Math.max(1, Math.floor(img.filteredBoundary.length / 12));
+ ctx.font = '10px monospace';
+ ctx.fillStyle = 'rgba(255, 255, 0, 0.95)';
+ ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+ ctx.lineWidth = 2;
+ for (let i = 0; i < img.filteredBoundary.length; i += labelInterval) {
+     const p = img.filteredBoundary[i];
+     const relX = (p.x - img.startPoint.x).toFixed(1);
+     const relY = (p.y - img.startPoint.y).toFixed(1);
+     const label = `(${relX},${relY})`;
+     ctx.strokeText(label, p.x + 5, p.y - 5);
+     ctx.fillText(label, p.x + 5, p.y - 5);
+ }
+
+ ---
+ 수정 계획
+
+ redrawCanvas() 함수 수정 (라인 780-794)
+
+ 좌표 텍스트 라벨을 노란색 점으로 변경:
+
+ // Draw yellow dots on filtered boundary points
+ const labelInterval = Math.max(1, Math.floor(img.filteredBoundary.length / 12));
+ ctx.fillStyle = 'rgba(255, 255, 0, 0.95)';
+ for (let i = 0; i < img.filteredBoundary.length; i += labelInterval) {
+     const p = img.filteredBoundary[i];
+     ctx.beginPath();
+     ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+     ctx.fill();
+ }
+
+ ---
+ 수정 파일
+
+ | File                       | Location     |
+ |----------------------------|--------------|
+ | trench-bucket-scanner.html | 라인 780-794 |

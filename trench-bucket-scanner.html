@@ -256,6 +256,25 @@
             background: #ff444433;
             color: #ff4444;
         }
+        .model-source-info {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        .model-source-info.none {
+            background: #33333366;
+            color: #888;
+        }
+        .model-source-info.built {
+            background: #00ff8833;
+            color: #00ff88;
+        }
+        .model-source-info.loaded {
+            background: #00d9ff33;
+            color: #00d9ff;
+        }
         .subsettings {
             margin-left: 20px;
             padding: 10px;
@@ -304,6 +323,7 @@
                 <span class="model-indicator not-ready" id="templateModelStatus">Template: Not Ready</span>
                 <span class="model-indicator not-ready" id="neuralModelStatus">Neural: Not Ready</span>
             </div>
+            <div class="model-source-info none" id="modelSourceInfo">Model: None</div>
             <div class="progress-bar" id="progressBarContainer" style="display: none;">
                 <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
             </div>
@@ -337,6 +357,9 @@
             <input type="file" id="fileInputDetect" multiple accept="image/*">
             <button class="btn btn-primary" onclick="document.getElementById('fileInputDetect').click()">
                 1. Load Images
+            </button>
+            <button class="btn btn-secondary" onclick="loadModels()">
+                Load Models
             </button>
             <button class="btn btn-success" id="detectBtn" onclick="detectAll()" disabled>
                 2. Detect Buckets
@@ -492,7 +515,9 @@
                 stdProfile: null,
                 templates: [],
                 tfModel: null,
-                angleConfig: null
+                angleConfig: null,
+                modelSource: null,      // 'built' | 'loaded'
+                loadedFileName: null
             },
             tfLoaded: false
         };
@@ -751,6 +776,16 @@
                         ctx.lineTo(img.filteredBoundary[i].x, img.filteredBoundary[i].y);
                     }
                     ctx.stroke();
+
+                    // Draw yellow dots on filtered boundary points
+                    const labelInterval = Math.max(1, Math.floor(img.filteredBoundary.length / 12));
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.95)';
+                    for (let i = 0; i < img.filteredBoundary.length; i += labelInterval) {
+                        const p = img.filteredBoundary[i];
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                 }
             }
         }
@@ -1262,6 +1297,9 @@
 
             showProgress(false);
             updateStatus('Models built successfully!');
+            state.trainingData.modelSource = 'built';
+            state.trainingData.loadedFileName = null;
+            updateModelSourceDisplay();
             updateButtons();
         }
 
@@ -1597,6 +1635,8 @@
                 state.trainingData.meanProfile = new Float32Array(data.meanProfile);
                 state.trainingData.stdProfile = new Float32Array(data.stdProfile);
                 state.trainingData.templates = data.templates;
+                state.trainingData.modelSource = 'loaded';
+                state.trainingData.loadedFileName = file.name;
 
                 if (data.meanProfile.length > 0) {
                     document.getElementById('statModelStatus').className = 'model-indicator ready';
@@ -1607,6 +1647,7 @@
                     document.getElementById('templateModelStatus').textContent = `Template: ${data.templates.length} loaded`;
                 }
 
+                updateModelSourceDisplay();
                 updateStatus('Models loaded!');
                 updateButtons();
             };
@@ -1618,6 +1659,20 @@
         // ============================================
         function updateStatus(text) {
             document.getElementById('statusText').textContent = text;
+        }
+
+        function updateModelSourceDisplay() {
+            const el = document.getElementById('modelSourceInfo');
+            if (state.trainingData.modelSource === 'built') {
+                el.textContent = 'Model: Built from training';
+                el.className = 'model-source-info built';
+            } else if (state.trainingData.modelSource === 'loaded') {
+                el.textContent = `Model: ${state.trainingData.loadedFileName}`;
+                el.className = 'model-source-info loaded';
+            } else {
+                el.textContent = 'Model: None';
+                el.className = 'model-source-info none';
+            }
         }
 
         function updateCounts() {
@@ -1665,7 +1720,9 @@
                 stdProfile: null,
                 templates: [],
                 tfModel: null,
-                angleConfig: null
+                angleConfig: null,
+                modelSource: null,
+                loadedFileName: null
             };
 
             document.getElementById('imageGrid').innerHTML = '';
@@ -1676,6 +1733,7 @@
             document.getElementById('neuralModelStatus').className = 'model-indicator not-ready';
             document.getElementById('neuralModelStatus').textContent = 'Neural: Not Ready';
 
+            updateModelSourceDisplay();
             updateCounts();
             updateStatus('Cleared.');
             updateButtons();
@@ -1715,6 +1773,35 @@
             updateStatus('Detection cleared.');
             updateButtons();
         }
+
+        // ============================================
+        // PARAMETER CHANGE LISTENERS (AUTO RE-DETECT)
+        // ============================================
+        function setupParameterListeners() {
+            const params = [
+                'directionAngle', 'scanRange', 'angleStep',
+                'sigmaThreshold', 'matchThreshold',
+                'fftCutoff', 'maxDerivative',
+                'ransacIterations', 'ransacThreshold', 'polyDegree'
+            ];
+
+            params.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', () => {
+                        const hasResults = state.images.some(
+                            img => img.mode === 'detection' && img.filteredBoundary?.length > 0
+                        );
+                        if (hasResults) {
+                            detectAll();
+                        }
+                    });
+                }
+            });
+        }
+
+        // Initialize on page load
+        setupParameterListeners();
     </script>
 </body>
 </html>
