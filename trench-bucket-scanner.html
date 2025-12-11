@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trench Bucket Scanner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #00d9ff;
+        }
+        .mode-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+        .mode-tab {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px 5px 0 0;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            background: #16213e;
+            color: #888;
+            transition: all 0.3s;
+        }
+        .mode-tab.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        .mode-tab:hover:not(.active) {
+            background: #1f2b47;
+            color: #eee;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        .btn-primary:hover {
+            background: #00b8d9;
+        }
+        .btn-success {
+            background: #00ff88;
+            color: #1a1a2e;
+        }
+        .btn-success:hover {
+            background: #00cc6a;
+        }
+        .btn-warning {
+            background: #ffaa00;
+            color: #1a1a2e;
+        }
+        .btn-warning:hover {
+            background: #dd9500;
+        }
+        .btn-danger {
+            background: #ff4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #cc3333;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #fileInput {
+            display: none;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .image-card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            position: relative;
+        }
+        .image-card.selected {
+            border: 3px solid #00d9ff;
+        }
+        .image-card h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #00d9ff;
+            word-break: break-all;
+        }
+        .canvas-container {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        .canvas-container canvas {
+            max-width: 100%;
+            height: auto;
+            cursor: crosshair;
+            border-radius: 5px;
+        }
+        .coord-info {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .coord-info span {
+            color: #00ff88;
+        }
+        .status-bar {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .status-bar p {
+            margin: 5px 0;
+        }
+        .settings-panel {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .settings-panel h3 {
+            margin-bottom: 15px;
+            color: #00d9ff;
+        }
+        .settings-section {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        .settings-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .settings-section h4 {
+            color: #ffaa00;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .setting-row label {
+            min-width: 150px;
+        }
+        .setting-row input, .setting-row select {
+            padding: 5px 10px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background: #1a1a2e;
+            color: #eee;
+            width: 150px;
+        }
+        .setting-row select {
+            width: 180px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            transition: width 0.3s;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .measurement-preview {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 5px;
+            font-size: 11px;
+        }
+        .info-badge {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 2px 8px;
+            background: #333;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .model-status {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .model-indicator {
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            background: #333;
+        }
+        .model-indicator.ready {
+            background: #00ff8833;
+            color: #00ff88;
+        }
+        .model-indicator.not-ready {
+            background: #ff444433;
+            color: #ff4444;
+        }
+        .subsettings {
+            margin-left: 20px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .comparison-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .comparison-item {
+            text-align: center;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 5px;
+        }
+        .comparison-item h5 {
+            color: #00d9ff;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trench Bucket Scanner</h1>
+
+        <div class="mode-tabs">
+            <button class="mode-tab active" onclick="switchMode('training')" id="tabTraining">Training Mode</button>
+            <button class="mode-tab" onclick="switchMode('detection')" id="tabDetection">Detection Mode</button>
+        </div>
+
+        <div class="status-bar">
+            <p><strong>Status:</strong> <span id="statusText">Ready - Load training images to begin</span></p>
+            <p><strong>Images:</strong> <span id="imageCount">0</span> |
+               <strong>With Points:</strong> <span id="pointCount">0</span> |
+               <strong>Boundaries Extracted:</strong> <span id="boundaryCount">0</span></p>
+            <div class="model-status">
+                <span class="model-indicator not-ready" id="statModelStatus">Statistical: Not Ready</span>
+                <span class="model-indicator not-ready" id="templateModelStatus">Template: Not Ready</span>
+                <span class="model-indicator not-ready" id="neuralModelStatus">Neural: Not Ready</span>
+            </div>
+            <div class="progress-bar" id="progressBarContainer" style="display: none;">
+                <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Training Mode Controls -->
+        <div class="controls" id="trainingControls">
+            <input type="file" id="fileInput" multiple accept="image/*">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                1. Load Images
+            </button>
+            <button class="btn btn-warning" id="extractBtn" onclick="extractAllBoundaries()" disabled>
+                2. Extract Boundaries
+            </button>
+            <button class="btn btn-success" id="buildModelBtn" onclick="buildModels()" disabled>
+                3. Build Models
+            </button>
+            <button class="btn btn-secondary" id="saveModelBtn" onclick="saveModels()" disabled>
+                Save Models
+            </button>
+            <button class="btn btn-secondary" onclick="loadModels()">
+                Load Models
+            </button>
+            <button class="btn btn-danger" onclick="clearAll()">
+                Clear All
+            </button>
+        </div>
+
+        <!-- Detection Mode Controls -->
+        <div class="controls hidden" id="detectionControls">
+            <input type="file" id="fileInputDetect" multiple accept="image/*">
+            <button class="btn btn-primary" onclick="document.getElementById('fileInputDetect').click()">
+                1. Load Images
+            </button>
+            <button class="btn btn-success" id="detectBtn" onclick="detectAll()" disabled>
+                2. Detect Buckets
+            </button>
+            <button class="btn btn-primary" id="exportBtn" onclick="exportResults()" disabled>
+                3. Export Results
+            </button>
+            <button class="btn btn-danger" onclick="clearDetection()">
+                Clear
+            </button>
+        </div>
+
+        <div class="settings-panel">
+            <h3>Settings</h3>
+
+            <!-- Direction Settings -->
+            <div class="settings-section">
+                <h4>Boundary Direction</h4>
+                <div class="setting-row">
+                    <label>Direction Angle (deg):</label>
+                    <input type="number" id="directionAngle" value="180" min="0" max="359">
+                    <span class="info-badge">Main direction to scan</span>
+                </div>
+                <div class="setting-row">
+                    <label>Scan Range (deg):</label>
+                    <input type="number" id="scanRange" value="90" min="10" max="180">
+                    <span class="info-badge">±range from direction</span>
+                </div>
+                <div class="setting-row">
+                    <label>Angle Step (deg):</label>
+                    <input type="number" id="angleStep" value="1" min="0.5" max="5" step="0.5">
+                </div>
+            </div>
+
+            <!-- Learning Method Settings -->
+            <div class="settings-section">
+                <h4>Learning Method</h4>
+                <div class="setting-row">
+                    <label>Method:</label>
+                    <select id="learningMethod" onchange="updateMethodSettings()">
+                        <option value="statistical">Statistical Modeling</option>
+                        <option value="template">Template Matching</option>
+                        <option value="neural">Neural Network (TF.js)</option>
+                        <option value="all">All Methods (Compare)</option>
+                    </select>
+                </div>
+
+                <!-- Statistical Settings -->
+                <div class="subsettings" id="statisticalSettings">
+                    <div class="setting-row">
+                        <label>Sigma Threshold:</label>
+                        <input type="number" id="sigmaThreshold" value="2.0" min="1.0" max="5.0" step="0.1">
+                        <span class="info-badge">Outlier detection (2-3 typical)</span>
+                    </div>
+                </div>
+
+                <!-- Template Settings -->
+                <div class="subsettings hidden" id="templateSettings">
+                    <div class="setting-row">
+                        <label>Match Threshold:</label>
+                        <input type="number" id="matchThreshold" value="0.7" min="0.1" max="1.0" step="0.05">
+                        <span class="info-badge">NCC score threshold</span>
+                    </div>
+                </div>
+
+                <!-- Neural Settings -->
+                <div class="subsettings hidden" id="neuralSettings">
+                    <div class="setting-row">
+                        <label>Epochs:</label>
+                        <input type="number" id="epochs" value="10" min="1" max="100">
+                    </div>
+                    <div class="setting-row">
+                        <label>Batch Size:</label>
+                        <input type="number" id="batchSize" value="4" min="1" max="32">
+                    </div>
+                    <div class="setting-row">
+                        <button class="btn btn-primary btn-small" id="loadTfBtn" onclick="loadTensorFlow()">
+                            Load TensorFlow.js
+                        </button>
+                        <span class="info-badge" id="tfStatus">Not loaded</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Noise Filter Settings -->
+            <div class="settings-section">
+                <h4>Noise Filtering</h4>
+                <div class="setting-row">
+                    <label>Filter Method:</label>
+                    <select id="noiseFilter" onchange="updateFilterSettings()">
+                        <option value="fft">FFT Frequency Analysis</option>
+                        <option value="consistency">Shape Consistency</option>
+                        <option value="ransac">RANSAC Fitting</option>
+                        <option value="all">All Methods (Compare)</option>
+                    </select>
+                </div>
+
+                <!-- FFT Settings -->
+                <div class="subsettings" id="fftSettings">
+                    <div class="setting-row">
+                        <label>Cutoff Frequency:</label>
+                        <input type="number" id="fftCutoff" value="0.1" min="0.01" max="0.5" step="0.01">
+                        <span class="info-badge">Lower = more smoothing</span>
+                    </div>
+                </div>
+
+                <!-- Consistency Settings -->
+                <div class="subsettings hidden" id="consistencySettings">
+                    <div class="setting-row">
+                        <label>Max Derivative:</label>
+                        <input type="number" id="maxDerivative" value="5.0" min="1.0" max="20.0" step="0.5">
+                        <span class="info-badge">Max dr/dθ allowed</span>
+                    </div>
+                </div>
+
+                <!-- RANSAC Settings -->
+                <div class="subsettings hidden" id="ransacSettings">
+                    <div class="setting-row">
+                        <label>Iterations:</label>
+                        <input type="number" id="ransacIterations" value="100" min="10" max="1000" step="10">
+                    </div>
+                    <div class="setting-row">
+                        <label>Inlier Threshold:</label>
+                        <input type="number" id="ransacThreshold" value="3.0" min="0.5" max="10.0" step="0.5">
+                        <span class="info-badge">Distance in pixels</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Polynomial Degree:</label>
+                        <input type="number" id="polyDegree" value="3" min="2" max="6">
+                    </div>
+                </div>
+            </div>
+
+            <p class="help-text">
+                Click on an image to set the start point. The boundary will be extracted in the specified direction.
+            </p>
+        </div>
+
+        <div class="image-grid" id="imageGrid"></div>
+    </div>
+
+    <script>
+        // ============================================
+        // GLOBAL STATE
+        // ============================================
+        const state = {
+            mode: 'training',
+            images: [],
+            sourceIndex: null,
+            trainingData: {
+                contours: [],
+                meanProfile: null,
+                stdProfile: null,
+                templates: [],
+                tfModel: null,
+                angleConfig: null
+            },
+            tfLoaded: false
+        };
+
+        // ============================================
+        // FILE INPUT HANDLERS
+        // ============================================
+        document.getElementById('fileInput').addEventListener('change', (e) => handleFileUpload(e, 'training'));
+        document.getElementById('fileInputDetect').addEventListener('change', (e) => handleFileUpload(e, 'detection'));
+
+        // ============================================
+        // MODE SWITCHING
+        // ============================================
+        function switchMode(mode) {
+            state.mode = mode;
+            document.getElementById('tabTraining').classList.toggle('active', mode === 'training');
+            document.getElementById('tabDetection').classList.toggle('active', mode === 'detection');
+            document.getElementById('trainingControls').classList.toggle('hidden', mode !== 'training');
+            document.getElementById('detectionControls').classList.toggle('hidden', mode !== 'detection');
+
+            if (mode === 'detection') {
+                updateStatus('Detection mode - Load images and detect bucket shapes');
+            } else {
+                updateStatus('Training mode - Load images to build shape models');
+            }
+        }
+
+        // ============================================
+        // SETTINGS UI HANDLERS
+        // ============================================
+        function updateMethodSettings() {
+            const method = document.getElementById('learningMethod').value;
+            document.getElementById('statisticalSettings').classList.toggle('hidden', method !== 'statistical' && method !== 'all');
+            document.getElementById('templateSettings').classList.toggle('hidden', method !== 'template' && method !== 'all');
+            document.getElementById('neuralSettings').classList.toggle('hidden', method !== 'neural' && method !== 'all');
+        }
+
+        function updateFilterSettings() {
+            const filter = document.getElementById('noiseFilter').value;
+            document.getElementById('fftSettings').classList.toggle('hidden', filter !== 'fft' && filter !== 'all');
+            document.getElementById('consistencySettings').classList.toggle('hidden', filter !== 'consistency' && filter !== 'all');
+            document.getElementById('ransacSettings').classList.toggle('hidden', filter !== 'ransac' && filter !== 'all');
+        }
+
+        // ============================================
+        // IMAGE LOADING
+        // ============================================
+        async function handleFileUpload(e, mode) {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            updateStatus('Loading images...');
+            const grid = document.getElementById('imageGrid');
+
+            if (mode === 'detection') {
+                // Clear previous detection images
+                state.images = state.images.filter(img => img.mode === 'training');
+                grid.innerHTML = '';
+                // Re-add training images if any
+                state.images.forEach((img, i) => {
+                    if (img.mode === 'training') {
+                        // Re-render training images (simplified)
+                    }
+                });
+            }
+
+            for (const file of files) {
+                const img = await loadImage(file);
+                const index = state.images.length;
+
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.id = `card-${index}`;
+                card.innerHTML = `
+                    <h3>${file.name}</h3>
+                    <div class="canvas-container">
+                        <canvas id="canvas-${index}"></canvas>
+                    </div>
+                    <div class="coord-info">
+                        Start Point: <span id="coord-${index}">Not set</span>
+                    </div>
+                    <div class="measurement-preview" id="preview-${index}" style="display:none;"></div>
+                `;
+                grid.appendChild(card);
+
+                const canvas = document.getElementById(`canvas-${index}`);
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                const grayData = toGrayscale(imageData);
+
+                state.images.push({
+                    name: file.name,
+                    element: img,
+                    canvas: canvas,
+                    ctx: ctx,
+                    grayData: grayData,
+                    width: img.width,
+                    height: img.height,
+                    startPoint: null,
+                    boundary: null,
+                    filteredBoundary: null,
+                    globalMean: calculateGlobalMean(grayData),
+                    mode: mode
+                });
+
+                canvas.addEventListener('click', (e) => handleCanvasClick(e, index));
+            }
+
+            updateCounts();
+            updateStatus(`${files.length} images loaded. Click to set start points.`);
+            updateButtons();
+            e.target.value = '';
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ============================================
+        // CORE IMAGE PROCESSING
+        // ============================================
+        function toGrayscale(imageData) {
+            const data = imageData.data;
+            const gray = new Float32Array(imageData.width * imageData.height);
+            for (let i = 0; i < gray.length; i++) {
+                const idx = i * 4;
+                gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+            }
+            return gray;
+        }
+
+        function calculateGlobalMean(grayData) {
+            let sum = 0;
+            for (let i = 0; i < grayData.length; i++) {
+                sum += grayData[i];
+            }
+            return sum / grayData.length;
+        }
+
+        function bilinearSample(grayData, width, height, x, y) {
+            const x0 = Math.floor(x);
+            const y0 = Math.floor(y);
+            const x1 = Math.min(x0 + 1, width - 1);
+            const y1 = Math.min(y0 + 1, height - 1);
+            const wx = x - x0;
+            const wy = y - y0;
+
+            const i00 = grayData[y0 * width + x0];
+            const i10 = grayData[y0 * width + x1];
+            const i01 = grayData[y1 * width + x0];
+            const i11 = grayData[y1 * width + x1];
+
+            return (1 - wx) * (1 - wy) * i00 +
+                   wx * (1 - wy) * i10 +
+                   (1 - wx) * wy * i01 +
+                   wx * wy * i11;
+        }
+
+        // ============================================
+        // CANVAS INTERACTION
+        // ============================================
+        function handleCanvasClick(e, index) {
+            const canvas = state.images[index].canvas;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            setStartPoint(index, x, y);
+            state.sourceIndex = index;
+
+            document.querySelectorAll('.image-card').forEach(c => c.classList.remove('selected'));
+            document.getElementById(`card-${index}`).classList.add('selected');
+
+            updateStatus(`Start point set at (${x}, ${y}) on "${state.images[index].name}"`);
+            updateButtons();
+        }
+
+        function setStartPoint(index, x, y) {
+            const img = state.images[index];
+            img.startPoint = { x, y };
+            redrawCanvas(index);
+            document.getElementById(`coord-${index}`).textContent = `(${x}, ${y})`;
+            updateCounts();
+        }
+
+        function redrawCanvas(index) {
+            const img = state.images[index];
+            const ctx = img.ctx;
+
+            ctx.drawImage(img.element, 0, 0);
+
+            // Draw start point
+            if (img.startPoint) {
+                ctx.beginPath();
+                ctx.arc(img.startPoint.x, img.startPoint.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw direction indicator
+                const dirAngle = parseFloat(document.getElementById('directionAngle').value) * Math.PI / 180;
+                const range = parseFloat(document.getElementById('scanRange').value) * Math.PI / 180;
+                const lineLen = 30;
+
+                ctx.beginPath();
+                ctx.moveTo(img.startPoint.x, img.startPoint.y);
+                ctx.lineTo(
+                    img.startPoint.x + lineLen * Math.cos(dirAngle),
+                    img.startPoint.y + lineLen * Math.sin(dirAngle)
+                );
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw range arc
+                ctx.beginPath();
+                ctx.arc(img.startPoint.x, img.startPoint.y, 20, dirAngle - range, dirAngle + range);
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)';
+                ctx.stroke();
+            }
+
+            // Draw boundary points
+            if (img.boundary && img.boundary.length > 0) {
+                ctx.fillStyle = 'rgba(0, 255, 136, 0.6)';
+                for (const p of img.boundary) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Draw filtered boundary if exists
+                if (img.filteredBoundary && img.filteredBoundary.length > 0) {
+                    ctx.strokeStyle = 'rgba(0, 217, 255, 0.8)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(img.filteredBoundary[0].x, img.filteredBoundary[0].y);
+                    for (let i = 1; i < img.filteredBoundary.length; i++) {
+                        ctx.lineTo(img.filteredBoundary[i].x, img.filteredBoundary[i].y);
+                    }
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // ============================================
+        // BOUNDARY EXTRACTION
+        // ============================================
+        function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
+            const { startPoint, grayData, width, height, globalMean } = img;
+            const results = [];
+            const threshold = globalMean;
+
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+
+                for (let r = 1; r < maxRadius; r++) {
+                    const x = startPoint.x + r * dx;
+                    const y = startPoint.y + r * dy;
+
+                    if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+                    const intensity = bilinearSample(grayData, width, height, x, y);
+
+                    if (intensity > threshold) {
+                        results.push({
+                            angle: angle,
+                            radius: r,
+                            x: x,
+                            y: y,
+                            intensity: intensity
+                        });
+                        break;
+                    }
+                }
+            }
+
+            return results;
+        }
+
+        async function extractAllBoundaries() {
+            const imagesWithPoints = state.images.filter(img => img.startPoint && img.mode === 'training');
+            if (imagesWithPoints.length === 0) {
+                alert('Set start points on training images first.');
+                return;
+            }
+
+            const directionDeg = parseFloat(document.getElementById('directionAngle').value);
+            const rangeDeg = parseFloat(document.getElementById('scanRange').value);
+            const stepDeg = parseFloat(document.getElementById('angleStep').value);
+
+            updateStatus('Extracting boundaries...');
+            showProgress(true);
+
+            state.trainingData.contours = [];
+            state.trainingData.angleConfig = { directionDeg, rangeDeg, stepDeg };
+
+            let processed = 0;
+            for (let i = 0; i < state.images.length; i++) {
+                const img = state.images[i];
+                if (!img.startPoint || img.mode !== 'training') continue;
+
+                img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
+                state.trainingData.contours.push({
+                    imageIndex: i,
+                    points: img.boundary
+                });
+
+                redrawCanvas(i);
+
+                const preview = document.getElementById(`preview-${i}`);
+                preview.style.display = 'block';
+                preview.innerHTML = `<strong>Boundary:</strong> ${img.boundary.length} points extracted`;
+
+                processed++;
+                updateProgress(processed / imagesWithPoints.length * 100);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+
+            showProgress(false);
+            updateStatus(`Extracted boundaries from ${processed} images. Ready to build models.`);
+            updateCounts();
+            updateButtons();
+        }
+
+        // ============================================
+        // STATISTICAL MODELING
+        // ============================================
+        function computeStatisticalModel(contours, angleConfig) {
+            const { directionDeg, rangeDeg, stepDeg } = angleConfig;
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+            const numAngles = Math.ceil((endAngle - startAngle) / stepDeg) + 1;
+
+            const radiusSum = new Float32Array(numAngles);
+            const radiusSumSq = new Float32Array(numAngles);
+            const counts = new Uint32Array(numAngles);
+
+            for (const contour of contours) {
+                for (const p of contour.points) {
+                    const idx = Math.round((p.angle - startAngle) / stepDeg);
+                    if (idx >= 0 && idx < numAngles) {
+                        radiusSum[idx] += p.radius;
+                        radiusSumSq[idx] += p.radius * p.radius;
+                        counts[idx]++;
+                    }
+                }
+            }
+
+            const meanProfile = new Float32Array(numAngles);
+            const stdProfile = new Float32Array(numAngles);
+
+            for (let i = 0; i < numAngles; i++) {
+                if (counts[i] > 0) {
+                    meanProfile[i] = radiusSum[i] / counts[i];
+                    const variance = radiusSumSq[i] / counts[i] - meanProfile[i] * meanProfile[i];
+                    stdProfile[i] = Math.sqrt(Math.max(0, variance));
+                }
+            }
+
+            return { meanProfile, stdProfile, startAngle, stepDeg };
+        }
+
+        function applyStatisticalFilter(boundary, model, sigmaThreshold) {
+            const { meanProfile, stdProfile, startAngle, stepDeg } = model;
+            const filtered = [];
+
+            for (const p of boundary) {
+                const idx = Math.round((p.angle - startAngle) / stepDeg);
+                if (idx >= 0 && idx < meanProfile.length) {
+                    const mean = meanProfile[idx];
+                    const std = stdProfile[idx] || 1;
+                    const deviation = Math.abs(p.radius - mean) / std;
+
+                    if (deviation <= sigmaThreshold) {
+                        filtered.push({ ...p, deviation });
+                    }
+                }
+            }
+
+            return filtered;
+        }
+
+        // ============================================
+        // TEMPLATE MATCHING
+        // ============================================
+        function saveTemplate(boundary, name) {
+            const radiusProfile = boundary.map(p => p.radius);
+            state.trainingData.templates.push({
+                name: name,
+                profile: radiusProfile,
+                angles: boundary.map(p => p.angle)
+            });
+        }
+
+        function matchTemplate(boundary, templates) {
+            if (templates.length === 0) return { score: 0, matched: boundary };
+
+            const radiusProfile = boundary.map(p => p.radius);
+            let bestScore = -Infinity;
+            let bestTemplate = null;
+
+            for (const template of templates) {
+                if (template.profile.length !== radiusProfile.length) continue;
+
+                // Normalized Cross-Correlation
+                let sumT = 0, sumI = 0, sumTT = 0, sumII = 0, sumTI = 0;
+                const n = radiusProfile.length;
+
+                for (let i = 0; i < n; i++) {
+                    const t = template.profile[i];
+                    const r = radiusProfile[i];
+                    sumT += t;
+                    sumI += r;
+                    sumTT += t * t;
+                    sumII += r * r;
+                    sumTI += t * r;
+                }
+
+                const meanT = sumT / n;
+                const meanI = sumI / n;
+                const varT = sumTT / n - meanT * meanT;
+                const varI = sumII / n - meanI * meanI;
+                const covar = sumTI / n - meanT * meanI;
+
+                const score = (varT > 0 && varI > 0) ? covar / (Math.sqrt(varT) * Math.sqrt(varI)) : 0;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestTemplate = template;
+                }
+            }
+
+            return { score: bestScore, template: bestTemplate, matched: boundary };
+        }
+
+        // ============================================
+        // FFT NOISE FILTERING
+        // ============================================
+        function fftFilter(boundary, cutoffRatio) {
+            const n = boundary.length;
+            if (n < 4) return boundary;
+
+            const radii = boundary.map(p => p.radius);
+
+            // Simple DFT
+            const real = new Float32Array(n);
+            const imag = new Float32Array(n);
+
+            for (let k = 0; k < n; k++) {
+                let sumReal = 0, sumImag = 0;
+                for (let t = 0; t < n; t++) {
+                    const angle = -2 * Math.PI * k * t / n;
+                    sumReal += radii[t] * Math.cos(angle);
+                    sumImag += radii[t] * Math.sin(angle);
+                }
+                real[k] = sumReal;
+                imag[k] = sumImag;
+            }
+
+            // Apply low-pass filter
+            const cutoff = Math.floor(n * cutoffRatio);
+            for (let k = cutoff; k < n - cutoff; k++) {
+                real[k] = 0;
+                imag[k] = 0;
+            }
+
+            // Inverse DFT
+            const filtered = new Float32Array(n);
+            for (let t = 0; t < n; t++) {
+                let sum = 0;
+                for (let k = 0; k < n; k++) {
+                    const angle = 2 * Math.PI * k * t / n;
+                    sum += real[k] * Math.cos(angle) - imag[k] * Math.sin(angle);
+                }
+                filtered[t] = sum / n;
+            }
+
+            return boundary.map((p, i) => ({
+                ...p,
+                radius: filtered[i],
+                x: p.x + (filtered[i] - p.radius) * Math.cos(p.angle * Math.PI / 180),
+                y: p.y + (filtered[i] - p.radius) * Math.sin(p.angle * Math.PI / 180)
+            }));
+        }
+
+        // ============================================
+        // SHAPE CONSISTENCY FILTER
+        // ============================================
+        function consistencyFilter(boundary, maxDerivative) {
+            const n = boundary.length;
+            if (n < 3) return boundary;
+
+            const filtered = [...boundary];
+            const flagged = new Array(n).fill(false);
+
+            // Calculate derivatives and flag outliers
+            for (let i = 1; i < n - 1; i++) {
+                const dr = boundary[i + 1].radius - boundary[i - 1].radius;
+                const dAngle = boundary[i + 1].angle - boundary[i - 1].angle;
+                const derivative = Math.abs(dr / dAngle);
+
+                if (derivative > maxDerivative) {
+                    flagged[i] = true;
+                }
+            }
+
+            // Interpolate flagged points
+            for (let i = 1; i < n - 1; i++) {
+                if (flagged[i]) {
+                    // Find nearest non-flagged neighbors
+                    let prevIdx = i - 1;
+                    while (prevIdx > 0 && flagged[prevIdx]) prevIdx--;
+                    let nextIdx = i + 1;
+                    while (nextIdx < n - 1 && flagged[nextIdx]) nextIdx++;
+
+                    const t = (i - prevIdx) / (nextIdx - prevIdx);
+                    const interpRadius = boundary[prevIdx].radius * (1 - t) + boundary[nextIdx].radius * t;
+
+                    const angle = boundary[i].angle;
+                    const rad = angle * Math.PI / 180;
+                    const startX = state.images[0].startPoint?.x || 0;
+                    const startY = state.images[0].startPoint?.y || 0;
+
+                    filtered[i] = {
+                        ...boundary[i],
+                        radius: interpRadius,
+                        x: startX + interpRadius * Math.cos(rad),
+                        y: startY + interpRadius * Math.sin(rad)
+                    };
+                }
+            }
+
+            return filtered;
+        }
+
+        // ============================================
+        // RANSAC FITTING
+        // ============================================
+        function ransacFit(boundary, iterations, threshold, degree) {
+            const n = boundary.length;
+            if (n < degree + 1) return { inliers: boundary, outliers: [], model: null };
+
+            const minSamples = degree + 1;
+            let bestInliers = [];
+            let bestModel = null;
+
+            for (let iter = 0; iter < iterations; iter++) {
+                // Random sample
+                const sampleIndices = [];
+                while (sampleIndices.length < minSamples) {
+                    const idx = Math.floor(Math.random() * n);
+                    if (!sampleIndices.includes(idx)) {
+                        sampleIndices.push(idx);
+                    }
+                }
+
+                const samples = sampleIndices.map(i => boundary[i]);
+
+                // Fit polynomial
+                const model = fitPolynomial(samples, degree);
+                if (!model) continue;
+
+                // Count inliers
+                const inliers = [];
+                for (const p of boundary) {
+                    const predicted = evaluatePolynomial(model, p.angle);
+                    const error = Math.abs(p.radius - predicted);
+                    if (error < threshold) {
+                        inliers.push(p);
+                    }
+                }
+
+                if (inliers.length > bestInliers.length) {
+                    bestInliers = inliers;
+                    bestModel = model;
+                }
+            }
+
+            // Refit with all inliers
+            if (bestInliers.length >= minSamples) {
+                bestModel = fitPolynomial(bestInliers, degree);
+            }
+
+            const outliers = boundary.filter(p => !bestInliers.includes(p));
+
+            // Generate filtered boundary using model
+            const filtered = boundary.map(p => {
+                const predictedRadius = evaluatePolynomial(bestModel, p.angle);
+                const rad = p.angle * Math.PI / 180;
+                const startX = state.images[0].startPoint?.x || 0;
+                const startY = state.images[0].startPoint?.y || 0;
+                return {
+                    ...p,
+                    radius: predictedRadius,
+                    x: startX + predictedRadius * Math.cos(rad),
+                    y: startY + predictedRadius * Math.sin(rad)
+                };
+            });
+
+            return { inliers: bestInliers, outliers, model: bestModel, filtered };
+        }
+
+        function fitPolynomial(points, degree) {
+            const n = points.length;
+            if (n < degree + 1) return null;
+
+            // Build Vandermonde matrix
+            const X = [];
+            const y = [];
+            for (const p of points) {
+                const row = [];
+                for (let d = 0; d <= degree; d++) {
+                    row.push(Math.pow(p.angle, d));
+                }
+                X.push(row);
+                y.push(p.radius);
+            }
+
+            // Solve using normal equations: (X^T X)^-1 X^T y
+            const XtX = [];
+            const Xty = [];
+
+            for (let i = 0; i <= degree; i++) {
+                XtX[i] = [];
+                Xty[i] = 0;
+                for (let j = 0; j <= degree; j++) {
+                    let sum = 0;
+                    for (let k = 0; k < n; k++) {
+                        sum += X[k][i] * X[k][j];
+                    }
+                    XtX[i][j] = sum;
+                }
+                for (let k = 0; k < n; k++) {
+                    Xty[i] += X[k][i] * y[k];
+                }
+            }
+
+            // Solve using Gaussian elimination
+            const coeffs = solveLinearSystem(XtX, Xty);
+            return coeffs;
+        }
+
+        function solveLinearSystem(A, b) {
+            const n = b.length;
+            const aug = A.map((row, i) => [...row, b[i]]);
+
+            // Forward elimination
+            for (let i = 0; i < n; i++) {
+                let maxRow = i;
+                for (let k = i + 1; k < n; k++) {
+                    if (Math.abs(aug[k][i]) > Math.abs(aug[maxRow][i])) {
+                        maxRow = k;
+                    }
+                }
+                [aug[i], aug[maxRow]] = [aug[maxRow], aug[i]];
+
+                if (Math.abs(aug[i][i]) < 1e-10) continue;
+
+                for (let k = i + 1; k < n; k++) {
+                    const factor = aug[k][i] / aug[i][i];
+                    for (let j = i; j <= n; j++) {
+                        aug[k][j] -= factor * aug[i][j];
+                    }
+                }
+            }
+
+            // Back substitution
+            const x = new Array(n).fill(0);
+            for (let i = n - 1; i >= 0; i--) {
+                if (Math.abs(aug[i][i]) < 1e-10) continue;
+                x[i] = aug[i][n];
+                for (let j = i + 1; j < n; j++) {
+                    x[i] -= aug[i][j] * x[j];
+                }
+                x[i] /= aug[i][i];
+            }
+
+            return x;
+        }
+
+        function evaluatePolynomial(coeffs, x) {
+            if (!coeffs) return 0;
+            let result = 0;
+            for (let i = 0; i < coeffs.length; i++) {
+                result += coeffs[i] * Math.pow(x, i);
+            }
+            return result;
+        }
+
+        // ============================================
+        // BUILD MODELS
+        // ============================================
+        async function buildModels() {
+            if (state.trainingData.contours.length === 0) {
+                alert('Extract boundaries first.');
+                return;
+            }
+
+            const method = document.getElementById('learningMethod').value;
+            updateStatus('Building models...');
+            showProgress(true);
+
+            // Statistical model
+            if (method === 'statistical' || method === 'all') {
+                const model = computeStatisticalModel(state.trainingData.contours, state.trainingData.angleConfig);
+                state.trainingData.meanProfile = model.meanProfile;
+                state.trainingData.stdProfile = model.stdProfile;
+                document.getElementById('statModelStatus').className = 'model-indicator ready';
+                document.getElementById('statModelStatus').textContent = 'Statistical: Ready';
+                updateProgress(33);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Template model
+            if (method === 'template' || method === 'all') {
+                state.trainingData.templates = [];
+                for (let i = 0; i < state.trainingData.contours.length; i++) {
+                    saveTemplate(state.trainingData.contours[i].points, `template_${i}`);
+                }
+                document.getElementById('templateModelStatus').className = 'model-indicator ready';
+                document.getElementById('templateModelStatus').textContent = `Template: ${state.trainingData.templates.length} saved`;
+                updateProgress(66);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Neural network (placeholder - requires TF.js)
+            if (method === 'neural' || method === 'all') {
+                if (state.tfLoaded) {
+                    await trainNeuralModel();
+                    document.getElementById('neuralModelStatus').className = 'model-indicator ready';
+                    document.getElementById('neuralModelStatus').textContent = 'Neural: Trained';
+                } else {
+                    document.getElementById('neuralModelStatus').className = 'model-indicator not-ready';
+                    document.getElementById('neuralModelStatus').textContent = 'Neural: TF.js not loaded';
+                }
+                updateProgress(100);
+            }
+
+            showProgress(false);
+            updateStatus('Models built successfully!');
+            updateButtons();
+        }
+
+        // ============================================
+        // TENSORFLOW.JS INTEGRATION
+        // ============================================
+        async function loadTensorFlow() {
+            updateStatus('Loading TensorFlow.js...');
+            try {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js';
+                document.head.appendChild(script);
+
+                await new Promise((resolve, reject) => {
+                    script.onload = resolve;
+                    script.onerror = reject;
+                });
+
+                state.tfLoaded = true;
+                document.getElementById('tfStatus').textContent = 'Loaded';
+                document.getElementById('tfStatus').style.color = '#00ff88';
+                updateStatus('TensorFlow.js loaded successfully');
+            } catch (e) {
+                updateStatus('Failed to load TensorFlow.js: ' + e.message);
+            }
+        }
+
+        async function trainNeuralModel() {
+            if (!state.tfLoaded || typeof tf === 'undefined') return;
+
+            const epochs = parseInt(document.getElementById('epochs').value);
+            const batchSize = parseInt(document.getElementById('batchSize').value);
+
+            // Prepare training data
+            const inputs = [];
+            const outputs = [];
+
+            for (const contour of state.trainingData.contours) {
+                const img = state.images[contour.imageIndex];
+                if (!img) continue;
+
+                // Use grayscale patch around start point as input
+                const patchSize = 64;
+                const patch = extractPatch(img.grayData, img.width, img.height, img.startPoint.x, img.startPoint.y, patchSize);
+                inputs.push(patch);
+
+                // Output: normalized radius values
+                const radii = contour.points.map(p => p.radius / 100); // Normalize
+                outputs.push(radii);
+            }
+
+            if (inputs.length === 0) return;
+
+            // Build simple model
+            const model = tf.sequential();
+            model.add(tf.layers.flatten({ inputShape: [64, 64] }));
+            model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+            model.add(tf.layers.dense({ units: outputs[0].length, activation: 'linear' }));
+
+            model.compile({
+                optimizer: 'adam',
+                loss: 'meanSquaredError'
+            });
+
+            const xs = tf.tensor3d(inputs);
+            const ys = tf.tensor2d(outputs);
+
+            await model.fit(xs, ys, {
+                epochs: epochs,
+                batchSize: batchSize,
+                callbacks: {
+                    onEpochEnd: (epoch, logs) => {
+                        updateStatus(`Training epoch ${epoch + 1}/${epochs}, loss: ${logs.loss.toFixed(4)}`);
+                    }
+                }
+            });
+
+            state.trainingData.tfModel = model;
+            xs.dispose();
+            ys.dispose();
+        }
+
+        function extractPatch(grayData, width, height, cx, cy, size) {
+            const patch = [];
+            const halfSize = size / 2;
+
+            for (let dy = -halfSize; dy < halfSize; dy++) {
+                const row = [];
+                for (let dx = -halfSize; dx < halfSize; dx++) {
+                    const x = Math.min(Math.max(cx + dx, 0), width - 1);
+                    const y = Math.min(Math.max(cy + dy, 0), height - 1);
+                    row.push(grayData[y * width + x] / 255);
+                }
+                patch.push(row);
+            }
+            return patch;
+        }
+
+        // ============================================
+        // DETECTION
+        // ============================================
+        async function detectAll() {
+            const detectionImages = state.images.filter(img => img.startPoint && img.mode === 'detection');
+            if (detectionImages.length === 0) {
+                alert('Load images and set start points first.');
+                return;
+            }
+
+            const method = document.getElementById('learningMethod').value;
+            const filter = document.getElementById('noiseFilter').value;
+            const directionDeg = parseFloat(document.getElementById('directionAngle').value);
+            const rangeDeg = parseFloat(document.getElementById('scanRange').value);
+            const stepDeg = parseFloat(document.getElementById('angleStep').value);
+
+            updateStatus('Detecting bucket shapes...');
+            showProgress(true);
+
+            let processed = 0;
+            for (let i = 0; i < state.images.length; i++) {
+                const img = state.images[i];
+                if (!img.startPoint || img.mode !== 'detection') continue;
+
+                // Extract boundary
+                img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
+
+                // Apply learning method
+                let detectedBoundary = img.boundary;
+
+                if (method === 'statistical' || method === 'all') {
+                    if (state.trainingData.meanProfile) {
+                        const sigma = parseFloat(document.getElementById('sigmaThreshold').value);
+                        detectedBoundary = applyStatisticalFilter(img.boundary, {
+                            meanProfile: state.trainingData.meanProfile,
+                            stdProfile: state.trainingData.stdProfile,
+                            startAngle: state.trainingData.angleConfig.directionDeg - state.trainingData.angleConfig.rangeDeg,
+                            stepDeg: state.trainingData.angleConfig.stepDeg
+                        }, sigma);
+                    }
+                }
+
+                if (method === 'template' || method === 'all') {
+                    const matchResult = matchTemplate(img.boundary, state.trainingData.templates);
+                    img.templateScore = matchResult.score;
+                }
+
+                // Apply noise filter
+                img.filteredBoundary = applyNoiseFilter(detectedBoundary, filter, img);
+
+                redrawCanvas(i);
+
+                const preview = document.getElementById(`preview-${i}`);
+                preview.style.display = 'block';
+                let previewHtml = `<strong>Detected:</strong> ${img.boundary.length} points`;
+                if (img.filteredBoundary) {
+                    previewHtml += ` | <strong>Filtered:</strong> ${img.filteredBoundary.length} points`;
+                }
+                if (img.templateScore !== undefined) {
+                    previewHtml += ` | <strong>Match:</strong> ${(img.templateScore * 100).toFixed(1)}%`;
+                }
+                preview.innerHTML = previewHtml;
+
+                processed++;
+                updateProgress(processed / detectionImages.length * 100);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+
+            showProgress(false);
+            updateStatus(`Detection complete. ${processed} images processed.`);
+            updateButtons();
+        }
+
+        function applyNoiseFilter(boundary, filterType, img) {
+            if (!boundary || boundary.length === 0) return boundary;
+
+            let filtered = boundary;
+
+            if (filterType === 'fft' || filterType === 'all') {
+                const cutoff = parseFloat(document.getElementById('fftCutoff').value);
+                filtered = fftFilter(filtered, cutoff);
+            }
+
+            if (filterType === 'consistency' || filterType === 'all') {
+                const maxDeriv = parseFloat(document.getElementById('maxDerivative').value);
+                filtered = consistencyFilter(filtered, maxDeriv);
+            }
+
+            if (filterType === 'ransac' || filterType === 'all') {
+                const iterations = parseInt(document.getElementById('ransacIterations').value);
+                const threshold = parseFloat(document.getElementById('ransacThreshold').value);
+                const degree = parseInt(document.getElementById('polyDegree').value);
+                const result = ransacFit(filtered, iterations, threshold, degree);
+                filtered = result.filtered || filtered;
+                img.ransacOutliers = result.outliers;
+            }
+
+            // Update coordinates based on start point
+            if (img.startPoint) {
+                filtered = filtered.map(p => ({
+                    ...p,
+                    x: img.startPoint.x + p.radius * Math.cos(p.angle * Math.PI / 180),
+                    y: img.startPoint.y + p.radius * Math.sin(p.angle * Math.PI / 180)
+                }));
+            }
+
+            return filtered;
+        }
+
+        // ============================================
+        // EXPORT
+        // ============================================
+        async function exportResults() {
+            const measuredImages = state.images.filter(img => img.filteredBoundary && img.filteredBoundary.length > 0);
+            if (measuredImages.length === 0) {
+                alert('No detection results to export.');
+                return;
+            }
+
+            updateStatus('Preparing export...');
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+            const zip = new JSZip();
+
+            // JSON export
+            const jsonData = {
+                exportDate: new Date().toISOString(),
+                settings: {
+                    learningMethod: document.getElementById('learningMethod').value,
+                    noiseFilter: document.getElementById('noiseFilter').value,
+                    directionAngle: parseFloat(document.getElementById('directionAngle').value),
+                    scanRange: parseFloat(document.getElementById('scanRange').value),
+                    angleStep: parseFloat(document.getElementById('angleStep').value)
+                },
+                images: measuredImages.map(img => ({
+                    name: img.name,
+                    startPoint: img.startPoint,
+                    globalMean: img.globalMean,
+                    templateScore: img.templateScore,
+                    coordinates: img.filteredBoundary.map(p => ({
+                        x: parseFloat((p.x - img.startPoint.x).toFixed(4)),
+                        y: parseFloat((p.y - img.startPoint.y).toFixed(4)),
+                        intensity: parseFloat(p.intensity.toFixed(4))
+                    }))
+                }))
+            };
+            zip.file('bucket_detection.json', JSON.stringify(jsonData, null, 2));
+
+            // XLSX export
+            const workbook = XLSX.utils.book_new();
+
+            const summaryData = [
+                ['Image', 'Start X', 'Start Y', 'Points', 'Template Score']
+            ];
+            for (const img of measuredImages) {
+                summaryData.push([
+                    img.name,
+                    img.startPoint.x,
+                    img.startPoint.y,
+                    img.filteredBoundary.length,
+                    img.templateScore?.toFixed(4) || 'N/A'
+                ]);
+            }
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+
+            for (const img of measuredImages) {
+                const sheetName = img.name.slice(0, 28).replace(/[\\\/\*\?\[\]:]/g, '_');
+                const data = [['x_cart', 'y_cart', 'intensity']];
+                for (const p of img.filteredBoundary) {
+                    data.push([
+                        (p.x - img.startPoint.x).toFixed(4),
+                        (p.y - img.startPoint.y).toFixed(4),
+                        p.intensity.toFixed(4)
+                    ]);
+                }
+                XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(data), sheetName);
+            }
+
+            zip.file('bucket_detection.xlsx', XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }));
+
+            // Images
+            const imagesFolder = zip.folder('images');
+            for (const img of state.images) {
+                if (!img.filteredBoundary) continue;
+                const dataUrl = img.canvas.toDataURL('image/png');
+                const base64Data = dataUrl.split(',')[1];
+                imagesFolder.file(img.name.replace(/\.[^/.]+$/, '') + '_detected.png', base64Data, { base64: true });
+            }
+
+            // Generate ZIP
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(zipBlob);
+            a.download = `bucket_detection_${timestamp}.zip`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+
+            updateStatus('Export complete!');
+        }
+
+        // ============================================
+        // MODEL PERSISTENCE
+        // ============================================
+        function saveModels() {
+            const data = {
+                version: 1,
+                angleConfig: state.trainingData.angleConfig,
+                meanProfile: Array.from(state.trainingData.meanProfile || []),
+                stdProfile: Array.from(state.trainingData.stdProfile || []),
+                templates: state.trainingData.templates
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'trench_models.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+
+            updateStatus('Models saved!');
+        }
+
+        function loadModels() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                state.trainingData.angleConfig = data.angleConfig;
+                state.trainingData.meanProfile = new Float32Array(data.meanProfile);
+                state.trainingData.stdProfile = new Float32Array(data.stdProfile);
+                state.trainingData.templates = data.templates;
+
+                if (data.meanProfile.length > 0) {
+                    document.getElementById('statModelStatus').className = 'model-indicator ready';
+                    document.getElementById('statModelStatus').textContent = 'Statistical: Ready';
+                }
+                if (data.templates.length > 0) {
+                    document.getElementById('templateModelStatus').className = 'model-indicator ready';
+                    document.getElementById('templateModelStatus').textContent = `Template: ${data.templates.length} loaded`;
+                }
+
+                updateStatus('Models loaded!');
+                updateButtons();
+            };
+            input.click();
+        }
+
+        // ============================================
+        // UI HELPERS
+        // ============================================
+        function updateStatus(text) {
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function updateCounts() {
+            const mode = state.mode;
+            const modeImages = state.images.filter(img => img.mode === mode);
+            document.getElementById('imageCount').textContent = modeImages.length;
+            document.getElementById('pointCount').textContent = modeImages.filter(img => img.startPoint).length;
+            document.getElementById('boundaryCount').textContent = modeImages.filter(img => img.boundary?.length > 0).length;
+        }
+
+        function showProgress(show) {
+            document.getElementById('progressBarContainer').style.display = show ? 'block' : 'none';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = `${percent}%`;
+        }
+
+        function updateButtons() {
+            const trainingImages = state.images.filter(img => img.mode === 'training');
+            const detectionImages = state.images.filter(img => img.mode === 'detection');
+
+            const hasTrainingPoints = trainingImages.some(img => img.startPoint);
+            const hasBoundaries = state.trainingData.contours.length > 0;
+            const hasModels = state.trainingData.meanProfile || state.trainingData.templates.length > 0;
+
+            document.getElementById('extractBtn').disabled = !hasTrainingPoints;
+            document.getElementById('buildModelBtn').disabled = !hasBoundaries;
+            document.getElementById('saveModelBtn').disabled = !hasModels;
+
+            const hasDetectionPoints = detectionImages.some(img => img.startPoint);
+            const hasDetectionResults = detectionImages.some(img => img.filteredBoundary?.length > 0);
+
+            document.getElementById('detectBtn').disabled = !hasDetectionPoints || !hasModels;
+            document.getElementById('exportBtn').disabled = !hasDetectionResults;
+        }
+
+        function clearAll() {
+            if (state.images.length > 0 && !confirm('Clear all data?')) return;
+
+            state.images = [];
+            state.trainingData = {
+                contours: [],
+                meanProfile: null,
+                stdProfile: null,
+                templates: [],
+                tfModel: null,
+                angleConfig: null
+            };
+
+            document.getElementById('imageGrid').innerHTML = '';
+            document.getElementById('statModelStatus').className = 'model-indicator not-ready';
+            document.getElementById('statModelStatus').textContent = 'Statistical: Not Ready';
+            document.getElementById('templateModelStatus').className = 'model-indicator not-ready';
+            document.getElementById('templateModelStatus').textContent = 'Template: Not Ready';
+            document.getElementById('neuralModelStatus').className = 'model-indicator not-ready';
+            document.getElementById('neuralModelStatus').textContent = 'Neural: Not Ready';
+
+            updateCounts();
+            updateStatus('Cleared.');
+            updateButtons();
+        }
+
+        function clearDetection() {
+            state.images = state.images.filter(img => img.mode === 'training');
+            document.getElementById('imageGrid').innerHTML = '';
+
+            // Re-render training images
+            state.images.forEach((img, i) => {
+                const grid = document.getElementById('imageGrid');
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.id = `card-${i}`;
+                card.innerHTML = `
+                    <h3>${img.name}</h3>
+                    <div class="canvas-container">
+                        <canvas id="canvas-${i}"></canvas>
+                    </div>
+                    <div class="coord-info">
+                        Start Point: <span id="coord-${i}">${img.startPoint ? `(${img.startPoint.x}, ${img.startPoint.y})` : 'Not set'}</span>
+                    </div>
+                `;
+                grid.appendChild(card);
+
+                const canvas = document.getElementById(`canvas-${i}`);
+                img.canvas = canvas;
+                img.ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                redrawCanvas(i);
+                canvas.addEventListener('click', (e) => handleCanvasClick(e, i));
+            });
+
+            updateCounts();
+            updateStatus('Detection cleared.');
+            updateButtons();
+        }
+    </script>
+</body>
+</html>
