@@ -986,3 +986,263 @@ index.html에 이미 Canny와 Adaptive edge detection이 구현되어 있네요.
 
   - 파라미터 변경 시 자동 재측정
   - Edge Method 변경 시 해당 설정 패널 표시/숨김
+
+## Q
+사용법, 옵션 의미, 값 변경시 detect 경향성 설명을 포함한 reademe 파일 작성
+
+## A
+1. 기본 사용법: Training Mode와 Detection Mode 워크플로우
+2. Edge Detection Methods (4가지):
+- Ray: Threshold Factor 의미와 변경 시 경향
+- Canny: Sigma, Low/High Threshold 의미와 변경 시 경향
+- Adaptive: Block Size, Constant C 의미와 변경 시 경향
+- Sobel: Gradient Threshold 의미와 변경 시 경향
+3. Direction Settings: 스캔 각도, 범위, 간격
+4. Noise Filtering: FFT, Consistency, RANSAC 설명
+5. Troubleshooting: 흔한 문제와 해결 방법
+- 점이 시작점에 몰림
+- Edge 불연속
+- 노이즈 문제
+- Edge 위치 조정
+6. 알고리즘 비교표: 각 방식의 장단점과 권장 상황
+
+## Q
+model 학습을 하지 않는 알고리즘도 있는데 그 경우 Build models 누르면 뭐가 나오나요
+  혹은 현재 기능 중 model 학습하는 알고리즘이 무엇인가요
+
+## Q
+최종 목적은 항상 boundary 좌표 추출입니다. 알고리즘에 따라 bucket 형상인식이 필요하면
+  workflow에 추가할 뿐입니다. 따라서 제일 먼저 알고리즘을 선택하고 그에 따라 ui가 변경하도록
+  해주세요. 모든 방식을 다 시도하고 알고리즘 및 변수에 따라 detect 결과가 어떻게 나오는지
+  시각화하면 더 좋습니다
+
+## A
+알고리즘 분류
+
+  - Edge Detection (모델 불필요): Ray, Canny, Adaptive, Sobel
+    - 워크플로우: Load → Set Points → Detect → Export
+  - Shape Learning (모델 필요): Statistical, Template, Neural
+    - 워크플로우: Training 후 Detection
+
+  주요 변경
+
+  1. 메인 알고리즘 선택을 최상단에 배치
+  2. Edge Detection 선택 시: Training 탭 숨김, 모델 없이 Detect 가능
+  3. Shape Learning 선택 시: Training/Detection 탭 모두 표시, 모델 필요
+  4. 기존 Edge Method와 Learning Method를 하나의 선택으로 통합
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Trench Bucket Scanner - 알고리즘 기반 UI 재설계
+
+ 목표
+
+ 최종 목적: Boundary 좌표 추출
+
+ 알고리즘 선택 → 해당 알고리즘에 맞는 워크플로우/UI 표시 → Detect → 결과 시각화
+
+ ---
+ 알고리즘 분류
+
+ A. 모델 불필요 (Edge Detection Only)
+
+ 이미지 처리만으로 boundary 추출, Training 단계 불필요
+
+ | 알고리즘 | 설명                  |
+ |----------|-----------------------|
+ | Ray      | 밝기 threshold 기반   |
+ | Canny    | Gradient + Hysteresis |
+ | Adaptive | 지역 평균 기반 binary |
+ | Sobel    | Gradient peak 감지    |
+
+ B. 모델 필요 (Shape Learning)
+
+ 학습 데이터로 모델 생성 후 Detection에 활용
+
+ | 알고리즘    | 설명                          |
+ |-------------|-------------------------------|
+ | Statistical | 평균/표준편차로 이상치 필터링 |
+ | Template    | NCC 매칭으로 형상 비교        |
+ | Neural      | TensorFlow.js 신경망          |
+
+ ---
+ 구현 계획
+
+ 1. 메인 알고리즘 선택 UI (최상단)
+
+ <div class="algorithm-selector">
+     <h3>Algorithm</h3>
+     <select id="mainAlgorithm" onchange="updateAlgorithmUI()">
+         <optgroup label="Edge Detection (No Training)">
+             <option value="ray">Ray (Threshold)</option>
+             <option value="canny">Canny Edge</option>
+             <option value="adaptive">Adaptive Threshold</option>
+             <option value="sobel">Sobel Gradient</option>
+         </optgroup>
+         <optgroup label="Shape Learning (Training Required)">
+             <option value="statistical">Statistical Model</option>
+             <option value="template">Template Matching</option>
+             <option value="neural">Neural Network</option>
+         </optgroup>
+     </select>
+ </div>
+
+ 2. 알고리즘에 따른 UI 변경
+
+ Edge Detection 선택 시:
+
+ - Training Mode 탭 숨김
+ - Detection Mode만 표시
+ - 워크플로우: Load Images → Set Points → Detect → Export
+
+ Shape Learning 선택 시:
+
+ - Training/Detection 탭 모두 표시
+ - 워크플로우: Training: Load → Points → Extract → Build Model
+ - 워크플로우: Detection: Load → Points → Detect → Export
+
+ 3. Detect 버튼 활성화 조건 변경
+
+ function updateButtons() {
+     const algorithm = document.getElementById('mainAlgorithm').value;
+     const isEdgeOnly = ['ray', 'canny', 'adaptive', 'sobel'].includes(algorithm);
+
+     const hasDetectionPoints = detectionImages.some(img => img.startPoint);
+     const hasModels = state.trainingData.meanProfile || state.trainingData.templates.length > 0;
+
+     // Edge Detection: 모델 없이도 Detect 가능
+     if (isEdgeOnly) {
+         document.getElementById('detectBtn').disabled = !hasDetectionPoints;
+     } else {
+         // Shape Learning: 모델 필요
+         document.getElementById('detectBtn').disabled = !hasDetectionPoints || !hasModels;
+     }
+ }
+
+ 4. 알고리즘별 설정 패널
+
+ <!-- Ray Settings -->
+ <div class="algo-settings" id="raySettings">
+     <label>Threshold Factor:</label>
+     <input type="number" id="rayThreshold" value="1.0">
+ </div>
+
+ <!-- Canny Settings -->
+ <div class="algo-settings hidden" id="cannySettings">
+     <label>Sigma:</label> <input id="cannySigma" value="1.4">
+     <label>Low:</label> <input id="cannyLow" value="20">
+     <label>High:</label> <input id="cannyHigh" value="50">
+ </div>
+
+ <!-- Adaptive Settings -->
+ <div class="algo-settings hidden" id="adaptiveSettings">
+     <label>Block Size:</label> <input id="adaptiveBlock" value="31">
+     <label>Constant C:</label> <input id="adaptiveC" value="10">
+ </div>
+
+ <!-- Sobel Settings -->
+ <div class="algo-settings hidden" id="sobelSettings">
+     <label>Gradient Threshold:</label> <input id="sobelThreshold" value="30">
+ </div>
+
+ <!-- Statistical Settings -->
+ <div class="algo-settings hidden" id="statisticalSettings">
+     <label>Sigma Threshold:</label> <input id="sigmaThreshold" value="2.0">
+ </div>
+
+ <!-- Template Settings -->
+ <div class="algo-settings hidden" id="templateSettings">
+     <label>Match Threshold:</label> <input id="matchThreshold" value="0.7">
+ </div>
+
+ <!-- Neural Settings -->
+ <div class="algo-settings hidden" id="neuralSettings">
+     <label>Epochs:</label> <input id="epochs" value="10">
+     <label>Batch Size:</label> <input id="batchSize" value="4">
+ </div>
+
+ 5. detectAll() 함수 수정
+
+ async function detectAll() {
+     const algorithm = document.getElementById('mainAlgorithm').value;
+     const isEdgeOnly = ['ray', 'canny', 'adaptive', 'sobel'].includes(algorithm);
+
+     for (const img of detectionImages) {
+         // 1. Edge Detection으로 boundary 추출
+         img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
+
+         // 2. Shape Learning인 경우 추가 필터링
+         if (!isEdgeOnly) {
+             img.boundary = applyModelFilter(img.boundary, algorithm);
+         }
+
+         // 3. Noise Filter 적용
+         img.filteredBoundary = applyNoiseFilter(img.boundary);
+
+         // 4. 시각화
+         redrawCanvas(i);
+     }
+ }
+
+ 6. 결과 시각화 개선
+
+ 모든 boundary 포인트에 노란색 점 표시 (현재 구현됨)
+
+ ---
+ 수정 파일
+
+ | File                       | 변경 내용
+         |
+ |----------------------------|------------------------------------------------------------------
+ --------|
+ | trench-bucket-scanner.html | 알고리즘 선택 UI, 조건부 탭 표시, updateButtons() 수정,
+ detectAll() 수정 |
+
+ ---
+ 구현 순서
+
+ 1. 메인 알고리즘 선택 드롭다운 추가 (최상단)
+ 2. updateAlgorithmUI() 함수 구현 (탭/설정 토글)
+ 3. updateButtons() 수정 (Edge Detection은 모델 불필요)
+ 4. detectAll() 수정 (알고리즘 분기 처리)
+ 5. 기존 Edge Method 선택 UI 제거 (메인 선택으로 통합)
+ 6. README 업데이트
+
+
+ 완료된 작업
+
+  알고리즘 기반 UI 재설계
+
+  1. 메인 알고리즘 선택 드롭다운 추가 (최상단)
+    - Edge Detection (No Training): Ray, Canny, Adaptive, Sobel
+    - Shape Learning (Training Required): Statistical, Template, Neural
+  2. updateAlgorithmUI() 함수 구현
+    - Edge Detection 선택 시: Training 탭 숨김, Detection만 표시
+    - Shape Learning 선택 시: Training/Detection 탭 모두 표시
+    - 알고리즘별 설정 패널 표시/숨김
+  3. updateButtons() 수정
+    - Edge Detection: 모델 없이도 Detect 버튼 활성화
+    - Shape Learning: 모델 필요 조건 유지
+  4. detectAll() 수정
+    - 알고리즘에 따른 분기 처리
+    - Edge Detection: extractBoundary() 직접 사용
+    - Shape Learning: extractBoundary() + 모델 필터링 적용
+  5. extractBoundary() 수정
+    - mainAlgorithm 값에 따라 적절한 edge detection 메서드 호출
+    - Shape Learning 알고리즘은 Ray를 base extraction으로 사용
+  6. README 업데이트
+    - 알고리즘 카테고리별 설명 추가
+    - Edge Detection vs Shape Learning 워크플로우 명시
+    - Shape Learning 알고리즘 설명 추가
+
+  주요 변경점
+
+  - edgeMethod → mainAlgorithm으로 통합
+  - learningMethod 제거 (mainAlgorithm으로 통합)
+  - Edge Detection 선택 시 Training 모드 불필요
+  - 파라미터 변경 시 자동 re-detect 기능 유지
+
+  

@@ -51,8 +51,9 @@ htmlcov/
 .pytest_cache/
 
 
-# --- Data
+# --- non-release data
 data/*
+debug/*
 
 # --- exclude.structure
 !data/.gitkeep

@@ -308,7 +308,28 @@
     <div class="container">
         <h1>Trench Bucket Scanner</h1>
 
-        <div class="mode-tabs">
+        <!-- Main Algorithm Selector -->
+        <div class="algorithm-selector" style="margin-bottom: 15px; padding: 15px; background: #16213e; border-radius: 8px; border: 1px solid #00d9ff;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <label style="font-weight: bold; color: #00d9ff;">Algorithm:</label>
+                <select id="mainAlgorithm" onchange="updateAlgorithmUI()" style="padding: 8px 12px; font-size: 14px; border-radius: 5px; background: #1a1a2e; color: white; border: 1px solid #444; min-width: 200px;">
+                    <optgroup label="Edge Detection (No Training)">
+                        <option value="ray">Ray (Threshold)</option>
+                        <option value="canny">Canny Edge</option>
+                        <option value="adaptive">Adaptive Threshold</option>
+                        <option value="sobel">Sobel Gradient</option>
+                    </optgroup>
+                    <optgroup label="Shape Learning (Training Required)">
+                        <option value="statistical">Statistical Model</option>
+                        <option value="template">Template Matching</option>
+                        <option value="neural">Neural Network</option>
+                    </optgroup>
+                </select>
+                <span id="algorithmDescription" style="color: #888; font-size: 12px;">이미지 처리만으로 boundary 추출 (Training 불필요)</span>
+            </div>
+        </div>
+
+        <div class="mode-tabs" id="modeTabs">
             <button class="mode-tab active" onclick="switchMode('training')" id="tabTraining">Training Mode</button>
             <button class="mode-tab" onclick="switchMode('detection')" id="tabDetection">Detection Mode</button>
         </div>
@@ -375,39 +396,16 @@
         <div class="settings-panel">
             <h3>Settings</h3>
 
-            <!-- Direction Settings -->
-            <div class="settings-section">
-                <h4>Boundary Direction</h4>
-                <div class="setting-row">
-                    <label>Edge Method:</label>
-                    <select id="edgeMethod" onchange="updateEdgeMethodSettings()">
-                        <option value="ray">Ray (Threshold)</option>
-                        <option value="canny">Canny Edge</option>
-                        <option value="adaptive">Adaptive Threshold</option>
-                        <option value="sobel">Sobel Gradient</option>
-                    </select>
-                </div>
-                <div class="setting-row">
-                    <label>Direction Angle (deg):</label>
-                    <input type="number" id="directionAngle" value="180" min="0" max="359">
-                    <span class="info-badge">Main direction to scan</span>
-                </div>
-                <div class="setting-row">
-                    <label>Scan Range (deg):</label>
-                    <input type="number" id="scanRange" value="90" min="10" max="180">
-                    <span class="info-badge">±range from direction</span>
-                </div>
-                <div class="setting-row">
-                    <label>Angle Step (deg):</label>
-                    <input type="number" id="angleStep" value="1" min="0.5" max="5" step="0.5">
-                </div>
+            <!-- Algorithm-specific Settings -->
+            <div class="settings-section" id="algorithmSettingsSection">
+                <h4>Algorithm Parameters</h4>
 
                 <!-- Ray Settings -->
                 <div class="subsettings" id="raySettings">
                     <div class="setting-row">
                         <label>Threshold Factor:</label>
                         <input type="number" id="rayThreshold" value="1.0" min="0.5" max="2.0" step="0.1">
-                        <span class="info-badge">× global mean</span>
+                        <span class="info-badge">× global mean (권장: 0.8-1.2)</span>
                     </div>
                 </div>
 
@@ -453,49 +451,26 @@
                     </div>
                 </div>
 
-                <!-- Troubleshooting Help -->
-                <div class="help-text" style="margin-top: 10px; padding: 10px; background: #1a1a2e; border-radius: 5px; font-size: 11px; color: #888;">
-                    <strong style="color: #ffcc00;">⚠️ 모든 점이 시작점 근처에 모여있다면:</strong><br>
-                    • <strong>Ray</strong>: 시작점을 어두운(trench 내부) 영역으로 이동, Threshold Factor ↑<br>
-                    • <strong>Canny</strong>: High Threshold ↓ (권장: 30-50), Sigma ↑<br>
-                    • <strong>Adaptive</strong>: Block Size ↑ (권장: 31-51), Constant C ↓<br>
-                    • <strong>Sobel</strong>: Gradient Threshold ↓ (권장: 20-40)
-                </div>
-            </div>
-
-            <!-- Learning Method Settings -->
-            <div class="settings-section">
-                <h4>Learning Method</h4>
-                <div class="setting-row">
-                    <label>Method:</label>
-                    <select id="learningMethod" onchange="updateMethodSettings()">
-                        <option value="statistical">Statistical Modeling</option>
-                        <option value="template">Template Matching</option>
-                        <option value="neural">Neural Network (TF.js)</option>
-                        <option value="all">All Methods (Compare)</option>
-                    </select>
-                </div>
-
                 <!-- Statistical Settings -->
-                <div class="subsettings" id="statisticalSettings">
+                <div class="subsettings hidden" id="statisticalAlgoSettings">
                     <div class="setting-row">
                         <label>Sigma Threshold:</label>
                         <input type="number" id="sigmaThreshold" value="2.0" min="1.0" max="5.0" step="0.1">
-                        <span class="info-badge">Outlier detection (2-3 typical)</span>
+                        <span class="info-badge">Outlier detection (권장: 2-3)</span>
                     </div>
                 </div>
 
                 <!-- Template Settings -->
-                <div class="subsettings hidden" id="templateSettings">
+                <div class="subsettings hidden" id="templateAlgoSettings">
                     <div class="setting-row">
                         <label>Match Threshold:</label>
                         <input type="number" id="matchThreshold" value="0.7" min="0.1" max="1.0" step="0.05">
-                        <span class="info-badge">NCC score threshold</span>
+                        <span class="info-badge">NCC score (권장: 0.6-0.8)</span>
                     </div>
                 </div>
 
                 <!-- Neural Settings -->
-                <div class="subsettings hidden" id="neuralSettings">
+                <div class="subsettings hidden" id="neuralAlgoSettings">
                     <div class="setting-row">
                         <label>Epochs:</label>
                         <input type="number" id="epochs" value="10" min="1" max="100">
@@ -508,8 +483,36 @@
                         <button class="btn btn-primary btn-small" id="loadTfBtn" onclick="loadTensorFlow()">
                             Load TensorFlow.js
                         </button>
-                        <span class="info-badge" id="tfStatus">Not loaded</span>
+                        <span id="tfStatus" style="margin-left: 10px; color: #888;">Not loaded</span>
                     </div>
+                </div>
+
+                <!-- Troubleshooting Help -->
+                <div class="help-text" style="margin-top: 10px; padding: 10px; background: #1a1a2e; border-radius: 5px; font-size: 11px; color: #888;">
+                    <strong style="color: #ffcc00;">⚠️ 모든 점이 시작점 근처에 모여있다면:</strong><br>
+                    • <strong>Ray</strong>: 시작점을 어두운(trench 내부) 영역으로 이동, Threshold Factor ↑<br>
+                    • <strong>Canny</strong>: High Threshold ↓ (권장: 30-50), Sigma ↑<br>
+                    • <strong>Adaptive</strong>: Block Size ↑ (권장: 31-51), Constant C ↓<br>
+                    • <strong>Sobel</strong>: Gradient Threshold ↓ (권장: 20-40)
+                </div>
+            </div>
+
+            <!-- Direction Settings -->
+            <div class="settings-section">
+                <h4>Scan Direction</h4>
+                <div class="setting-row">
+                    <label>Direction Angle (deg):</label>
+                    <input type="number" id="directionAngle" value="180" min="0" max="359">
+                    <span class="info-badge">Main direction to scan</span>
+                </div>
+                <div class="setting-row">
+                    <label>Scan Range (deg):</label>
+                    <input type="number" id="scanRange" value="90" min="10" max="180">
+                    <span class="info-badge">±range from direction</span>
+                </div>
+                <div class="setting-row">
+                    <label>Angle Step (deg):</label>
+                    <input type="number" id="angleStep" value="1" min="0.5" max="5" step="0.5">
                 </div>
             </div>
 
@@ -617,12 +620,7 @@
         // ============================================
         // SETTINGS UI HANDLERS
         // ============================================
-        function updateMethodSettings() {
-            const method = document.getElementById('learningMethod').value;
-            document.getElementById('statisticalSettings').classList.toggle('hidden', method !== 'statistical' && method !== 'all');
-            document.getElementById('templateSettings').classList.toggle('hidden', method !== 'template' && method !== 'all');
-            document.getElementById('neuralSettings').classList.toggle('hidden', method !== 'neural' && method !== 'all');
-        }
+        // Note: updateMethodSettings() removed - updateAlgorithmUI() handles algorithm-specific settings
 
         function updateFilterSettings() {
             const filter = document.getElementById('noiseFilter').value;
@@ -863,9 +861,11 @@
         // BOUNDARY EXTRACTION (Method Router)
         // ============================================
         function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
-            const method = document.getElementById('edgeMethod').value;
+            const algorithm = document.getElementById('mainAlgorithm').value;
 
-            switch (method) {
+            // For Edge Detection algorithms, use directly
+            // For Shape Learning algorithms, use Ray as base extraction method
+            switch (algorithm) {
                 case 'ray':
                     return extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg);
                 case 'canny':
@@ -874,6 +874,10 @@
                     return extractBoundaryAdaptive(img, directionDeg, rangeDeg, stepDeg);
                 case 'sobel':
                     return extractBoundarySobel(img, directionDeg, rangeDeg, stepDeg);
+                // Shape Learning algorithms use Ray as base extraction
+                case 'statistical':
+                case 'template':
+                case 'neural':
                 default:
                     return extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg);
             }
@@ -1739,12 +1743,12 @@
                 return;
             }
 
-            const method = document.getElementById('learningMethod').value;
+            const algorithm = document.getElementById('mainAlgorithm').value;
             updateStatus('Building models...');
             showProgress(true);
 
-            // Statistical model
-            if (method === 'statistical' || method === 'all') {
+            // Statistical model - build when statistical is selected or for all shape learning methods
+            if (algorithm === 'statistical' || ['template', 'neural'].includes(algorithm)) {
                 const model = computeStatisticalModel(state.trainingData.contours, state.trainingData.angleConfig);
                 state.trainingData.meanProfile = model.meanProfile;
                 state.trainingData.stdProfile = model.stdProfile;
@@ -1756,7 +1760,7 @@
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Template model
-            if (method === 'template' || method === 'all') {
+            if (algorithm === 'template' || algorithm === 'statistical') {
                 state.trainingData.templates = [];
                 for (let i = 0; i < state.trainingData.contours.length; i++) {
                     saveTemplate(state.trainingData.contours[i].points, `template_${i}`);
@@ -1769,7 +1773,7 @@
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Neural network (placeholder - requires TF.js)
-            if (method === 'neural' || method === 'all') {
+            if (algorithm === 'neural') {
                 if (state.tfLoaded) {
                     await trainNeuralModel();
                     document.getElementById('neuralModelStatus').className = 'model-indicator ready';
@@ -1895,13 +1899,23 @@
                 return;
             }
 
-            const method = document.getElementById('learningMethod').value;
+            const algorithm = document.getElementById('mainAlgorithm').value;
+            const isEdgeOnly = ['ray', 'canny', 'adaptive', 'sobel'].includes(algorithm);
             const filter = document.getElementById('noiseFilter').value;
             const directionDeg = parseFloat(document.getElementById('directionAngle').value);
             const rangeDeg = parseFloat(document.getElementById('scanRange').value);
             const stepDeg = parseFloat(document.getElementById('angleStep').value);
 
-            updateStatus('Detecting bucket shapes...');
+            // Check model requirement for Shape Learning algorithms
+            if (!isEdgeOnly) {
+                const hasModels = state.trainingData.meanProfile || state.trainingData.templates.length > 0;
+                if (!hasModels && algorithm !== 'neural') {
+                    alert('Shape Learning algorithms require trained models. Please train or load a model first.');
+                    return;
+                }
+            }
+
+            updateStatus(`Detecting boundaries using ${algorithm}...`);
             showProgress(true);
 
             let processed = 0;
@@ -1909,14 +1923,15 @@
                 const img = state.images[i];
                 if (!img.startPoint || img.mode !== 'detection') continue;
 
-                // Extract boundary
+                // Extract boundary using selected algorithm (edge detection method)
                 img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
 
-                // Apply learning method
+                // For Shape Learning algorithms, apply additional model-based filtering
                 let detectedBoundary = img.boundary;
 
-                if (method === 'statistical' || method === 'all') {
-                    if (state.trainingData.meanProfile) {
+                if (!isEdgeOnly) {
+                    // Apply shape learning model filtering
+                    if (algorithm === 'statistical' && state.trainingData.meanProfile) {
                         const sigma = parseFloat(document.getElementById('sigmaThreshold').value);
                         detectedBoundary = applyStatisticalFilter(img.boundary, {
                             meanProfile: state.trainingData.meanProfile,
@@ -1925,11 +1940,11 @@
                             stepDeg: state.trainingData.angleConfig.stepDeg
                         }, sigma);
                     }
-                }
 
-                if (method === 'template' || method === 'all') {
-                    const matchResult = matchTemplate(img.boundary, state.trainingData.templates);
-                    img.templateScore = matchResult.score;
+                    if (algorithm === 'template' && state.trainingData.templates.length > 0) {
+                        const matchResult = matchTemplate(img.boundary, state.trainingData.templates);
+                        img.templateScore = matchResult.score;
+                    }
                 }
 
                 // Apply noise filter
@@ -1939,7 +1954,7 @@
 
                 const preview = document.getElementById(`preview-${i}`);
                 preview.style.display = 'block';
-                let previewHtml = `<strong>Detected:</strong> ${img.boundary.length} points`;
+                let previewHtml = `<strong>Algorithm:</strong> ${algorithm} | <strong>Detected:</strong> ${img.boundary.length} points`;
                 if (img.filteredBoundary) {
                     previewHtml += ` | <strong>Filtered:</strong> ${img.filteredBoundary.length} points`;
                 }
@@ -1954,7 +1969,7 @@
             }
 
             showProgress(false);
-            updateStatus(`Detection complete. ${processed} images processed.`);
+            updateStatus(`Detection complete. ${processed} images processed using ${algorithm}.`);
             updateButtons();
         }
 
@@ -2012,7 +2027,7 @@
             const jsonData = {
                 exportDate: new Date().toISOString(),
                 settings: {
-                    learningMethod: document.getElementById('learningMethod').value,
+                    algorithm: document.getElementById('mainAlgorithm').value,
                     noiseFilter: document.getElementById('noiseFilter').value,
                     directionAngle: parseFloat(document.getElementById('directionAngle').value),
                     scanRange: parseFloat(document.getElementById('scanRange').value),
@@ -2192,7 +2207,17 @@
             const hasDetectionPoints = detectionImages.some(img => img.startPoint);
             const hasDetectionResults = detectionImages.some(img => img.filteredBoundary?.length > 0);
 
-            document.getElementById('detectBtn').disabled = !hasDetectionPoints || !hasModels;
+            // Check if algorithm is Edge Detection only (no model required)
+            const algorithm = document.getElementById('mainAlgorithm').value;
+            const isEdgeOnly = ['ray', 'canny', 'adaptive', 'sobel'].includes(algorithm);
+
+            // Edge Detection: 모델 없이도 Detect 가능
+            // Shape Learning: 모델 필요
+            if (isEdgeOnly) {
+                document.getElementById('detectBtn').disabled = !hasDetectionPoints;
+            } else {
+                document.getElementById('detectBtn').disabled = !hasDetectionPoints || !hasModels;
+            }
             document.getElementById('exportBtn').disabled = !hasDetectionResults;
         }
 
@@ -2269,8 +2294,8 @@
                 'sigmaThreshold', 'matchThreshold',
                 'fftCutoff', 'maxDerivative',
                 'ransacIterations', 'ransacThreshold', 'polyDegree',
-                // Edge method specific params
-                'edgeMethod', 'rayThreshold',
+                // Algorithm-specific params
+                'mainAlgorithm', 'rayThreshold',
                 'cannySigma', 'cannyLow', 'cannyHigh',
                 'adaptiveBlock', 'adaptiveC',
                 'sobelThreshold'
@@ -2292,19 +2317,55 @@
         }
 
         // ============================================
-        // EDGE METHOD SETTINGS TOGGLE
+        // ALGORITHM UI TOGGLE
         // ============================================
-        function updateEdgeMethodSettings() {
-            const method = document.getElementById('edgeMethod').value;
+        function updateAlgorithmUI() {
+            const algorithm = document.getElementById('mainAlgorithm').value;
+            const isEdgeOnly = ['ray', 'canny', 'adaptive', 'sobel'].includes(algorithm);
 
-            // Hide all method settings
-            document.getElementById('raySettings').classList.add('hidden');
-            document.getElementById('cannyEdgeSettings').classList.add('hidden');
-            document.getElementById('adaptiveEdgeSettings').classList.add('hidden');
-            document.getElementById('sobelEdgeSettings').classList.add('hidden');
+            // Update description
+            const descEl = document.getElementById('algorithmDescription');
+            if (isEdgeOnly) {
+                descEl.textContent = '이미지 처리만으로 boundary 추출 (Training 불필요)';
+            } else {
+                descEl.textContent = '학습 데이터로 모델 생성 후 Detection (Training 필요)';
+            }
 
-            // Show selected method settings
-            switch (method) {
+            // Toggle mode tabs visibility
+            const modeTabs = document.getElementById('modeTabs');
+            const tabTraining = document.getElementById('tabTraining');
+            if (isEdgeOnly) {
+                // Edge Detection: Hide training tab, switch to detection
+                tabTraining.style.display = 'none';
+                switchMode('detection');
+            } else {
+                // Shape Learning: Show both tabs
+                tabTraining.style.display = '';
+            }
+
+            // Toggle model status visibility
+            const modelStatus = document.querySelector('.model-status');
+            const modelSourceInfo = document.getElementById('modelSourceInfo');
+            if (isEdgeOnly) {
+                modelStatus.style.display = 'none';
+                modelSourceInfo.style.display = 'none';
+            } else {
+                modelStatus.style.display = '';
+                modelSourceInfo.style.display = '';
+            }
+
+            // Hide all algorithm settings
+            const allSettings = [
+                'raySettings', 'cannyEdgeSettings', 'adaptiveEdgeSettings', 'sobelEdgeSettings',
+                'statisticalAlgoSettings', 'templateAlgoSettings', 'neuralAlgoSettings'
+            ];
+            allSettings.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+
+            // Show selected algorithm settings
+            switch (algorithm) {
                 case 'ray':
                     document.getElementById('raySettings').classList.remove('hidden');
                     break;
@@ -2317,12 +2378,24 @@
                 case 'sobel':
                     document.getElementById('sobelEdgeSettings').classList.remove('hidden');
                     break;
+                case 'statistical':
+                    document.getElementById('statisticalAlgoSettings').classList.remove('hidden');
+                    break;
+                case 'template':
+                    document.getElementById('templateAlgoSettings').classList.remove('hidden');
+                    break;
+                case 'neural':
+                    document.getElementById('neuralAlgoSettings').classList.remove('hidden');
+                    break;
             }
+
+            // Update buttons based on new algorithm
+            updateButtons();
         }
 
         // Initialize on page load
         setupParameterListeners();
-        updateEdgeMethodSettings();
+        updateAlgorithmUI();
     </script>
 </body>
 </html>
