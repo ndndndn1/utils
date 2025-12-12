@@ -605,3 +605,384 @@ trench-bucket-scanner.html 에서 Detect Buckets 후 값을 바꿨을 때 인식
  | File                       | Location     |
  |----------------------------|--------------|
  | trench-bucket-scanner.html | 라인 780-794 |
+
+
+## Q
+bucket 형상 여부를 찾는 게 아니라 boundary 각 위치를 찾는 게 목적입니다.
+  debug 폴더에 true.png 가 제가 원하는 모습이고, 현재 의도하지 않은 모습이 false.png 입니다
+  원하는 의도대로 수정해주세요. 혹시 boundary를 찾으려 했지만 모든 20개 이상의 점이 같은 곳에
+  머물러있다면 변수를 어떤 방향으로 수정해야 하는지도 알려주세요(해당 변수 옆에 권장 값 추가),
+  혹은 전처리가 필요하다고 알려주거나요
+
+## A
+이미지를 확인했습니다.
+
+  true.png (원하는 모습): trench bucket 영역에 노란색/주황색 오버레이가 영역 전체를 덮고 있고,
+   노란색 점들이 bucket의 경계선(edge)을 따라 분포되어 있습니다.
+
+  false.png (현재 문제): 노란색 점이 시작점 근처에 모두 모여 있고, boundary를 따라 퍼지지
+  않았습니다.
+
+  문제의 원인을 파악하기 위해 현재 edge detection 알고리즘을 확인하겠습니다.
+
+● Read(trench-bucket-scanner.html)
+  ⎿  Read 50 lines
+
+● 문제를 파악했습니다. 현재 알고리즘의 문제점:
+
+  현재 로직 (라인 821):
+  if (intensity > threshold)  // threshold = globalMean
+
+  이 조건은 밝은 영역을 찾음 (intensity > threshold).
+  - SEM 이미지에서 trench 내부는 어두운 영역 (낮은 intensity)
+  - trench 바깥/벽은 밝은 영역 (높은 intensity)
+
+  문제: 시작점이 밝은 영역(bucket 바깥 또는 trench 벽) 근처에 있으면, ray가 시작하자마자 바로
+  threshold를 넘어서 r=1~2 정도에서 바로 break됨.
+
+  true.png를 보면, 시작점이 trench bucket 안쪽 어두운 영역에 있고, 거기서 ray를 쏴서 밝은 
+  경계(edge)를 찾아야 합니다.
+
+  계획을 업데이트하겠습니다:
+
+● Updated plan
+  ⎿  /plan to preview · ~/.claude/plans/reflective-cooking-rivest.md
+
+● 계획이 완성되었습니다.
+
+  문제 요약
+
+  원인: 시작점이 밝은 영역에 있으면, ray가 r=1에서 바로 threshold를 넘어 즉시 break되어 모든
+  점이 시작점 근처에 몰림
+
+  해결책:
+  1. Min Radius 설정 추가: 시작점 근처 픽셀을 건너뛰고 탐색 시작 (권장: 5-20px)
+  2. 시작점 밝기 경고: 시작점이 밝은 영역에 있으면 console 경고
+  3. 도움말 추가: 문제 발생 시 조치 방법 안내
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Trench Bucket Scanner - Boundary Detection 수정
+
+ 문제 분석
+
+ 현재 문제 (false.png)
+
+ - 노란색 점들이 시작점 근처에 모두 모여 있음
+ - Boundary가 trench edge를 따라 퍼지지 않음
+
+ 원하는 결과 (true.png)
+
+ - 노란색 점들이 trench bucket의 경계선(edge)을 따라 분포
+ - 시작점에서 ray를 쏴서 밝은 경계를 찾아야 함
+
+ ---
+ 원인 분석
+
+ 현재 알고리즘 (extractBoundary 함수, 라인 821):
+ const threshold = globalMean;
+ ...
+ if (intensity > threshold) {  // 밝은 픽셀을 찾으면 즉시 break
+     results.push({...});
+     break;
+ }
+
+ 문제점:
+ 1. 시작점이 이미 밝은 영역 (intensity > globalMean)에 있으면
+ 2. Ray가 r=1에서 바로 threshold를 넘어 즉시 break
+ 3. 결과: 모든 점이 시작점 근처(r=1~2)에 몰림
+
+ SEM 이미지 특성:
+ - Trench 내부: 어두움 (낮은 intensity)
+ - Trench 벽/edge: 밝음 (높은 intensity)
+ - 시작점은 trench 내부 어두운 영역에 있어야 함
+
+ ---
+ 수정 계획
+
+ 1. 시작점 검증 및 최소 거리 추가
+
+ 시작점이 어두운 영역에 있는지 확인하고, **최소 탐색 거리(minRadius)**를 추가:
+
+ extractBoundary() 함수 수정 (라인 793-832)
+
+ function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
+     const { startPoint, grayData, width, height, globalMean } = img;
+     const results = [];
+     const threshold = globalMean;
+     const minRadius = 5;  // 최소 탐색 거리 (시작점 근처 무시)
+
+     // 시작점이 밝은 영역인지 체크 (경고용)
+     const startIntensity = bilinearSample(grayData, width, height, startPoint.x, startPoint.y);
+     if (startIntensity > threshold) {
+         console.warn('Warning: Start point is in bright area. Move to dark (trench) area.');
+     }
+
+     const startAngle = directionDeg - rangeDeg;
+     const endAngle = directionDeg + rangeDeg;
+     const maxRadius = Math.ceil(Math.hypot(...));
+
+     for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+         const rad = angle * Math.PI / 180;
+         const dx = Math.cos(rad);
+         const dy = Math.sin(rad);
+
+         for (let r = minRadius; r < maxRadius; r++) {  // minRadius부터 시작
+             const x = startPoint.x + r * dx;
+             const y = startPoint.y + r * dy;
+
+             if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+             const intensity = bilinearSample(grayData, width, height, x, y);
+
+             if (intensity > threshold) {
+                 results.push({...});
+                 break;
+             }
+         }
+     }
+     return results;
+ }
+
+ 2. Settings에 Min Radius 옵션 추가
+
+ 사용자가 조절 가능하도록 UI에 추가:
+
+ HTML 수정 (Direction Settings 섹션)
+ <div class="setting-row">
+     <label>Min Radius (px):</label>
+     <input type="number" id="minRadius" value="5" min="1" max="50">
+     <span class="info-badge">Skip pixels near start (권장: 5-20)</span>
+ </div>
+
+ 3. 문제 진단 도움말 추가
+
+ 모든 점이 같은 곳에 모여있을 때의 가이드:
+
+ 권장 조치 (Settings 패널 help-text에 추가):
+ - Min Radius 증가: 시작점 근처 밝은 픽셀 무시 (권장: 10-30)
+ - 시작점 이동: 클릭 위치를 trench 내부 어두운 영역으로 이동
+ - Threshold 조정: 이미지가 전체적으로 밝으면 threshold 높임
+
+ ---
+ 수정 파일
+
+ | File                       | Location      | 변경 내용              |
+ |----------------------------|---------------|------------------------|
+ | trench-bucket-scanner.html | 라인 370 근처 | Min Radius input 추가  |
+ | trench-bucket-scanner.html | 라인 793-832  | extractBoundary() 수정 |
+ | trench-bucket-scanner.html | 라인 473 근처 | 도움말 텍스트 추가     |
+
+ ---
+ 구현 순서
+
+ 1. Settings에 Min Radius input 추가
+ 2. extractBoundary() 함수에 minRadius 적용
+ 3. 시작점 밝기 경고 로직 추가
+ 4. 도움말 텍스트 업데이트
+
+ ## Q
+ 원하는 건 1) 못 찾으면 변수 수정 가이드 텍스트 추가 2) edge 찾은 지점에 노란점 표시
+  기존에 ray로 했더니 잘 안 되어서 다른 방식의 알고리즘을 찾고 있습니다. 여러 방식을
+  시도해주세요
+
+## A
+ 1. Edge Method 선택 UI: Ray, Canny, Adaptive, Sobel 4가지 방식
+  2. 각 방식별 파라미터 설정 UI 추가
+  3. index.html에서 Canny/Adaptive 함수 포팅
+  4. Sobel gradient 방식 신규 구현 (gradient peak 감지)
+  5. 문제 진단 도움말 추가 (모든 점이 몰려있을 때 해결 방법)
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Trench Bucket Scanner - 다중 Edge Detection 알고리즘 추가
+
+ 요청 사항
+
+ 1. Edge 못 찾을 때 변수 수정 가이드 텍스트 추가
+ 2. Edge 찾은 지점에 노란색 점 표시
+ 3. 여러 Edge Detection 알고리즘 시도 (Ray 외 다른 방식)
+
+ ---
+ 현재 문제
+
+ - Ray-casting 방식: 시작점이 밝은 영역이면 즉시 break → 모든 점이 시작점 근처에 몰림
+ - index.html에 Canny, Adaptive 알고리즘이 이미 있음 → 포팅 필요
+
+ ---
+ 구현 계획
+
+ 1. Edge Detection 알고리즘 선택 UI 추가
+
+ Settings > Boundary Direction 섹션에 추가:
+ <div class="setting-row">
+     <label>Edge Method:</label>
+     <select id="edgeMethod">
+         <option value="ray">Ray (Threshold)</option>
+         <option value="canny">Canny Edge</option>
+         <option value="adaptive">Adaptive Threshold</option>
+         <option value="sobel">Sobel Gradient</option>
+     </select>
+ </div>
+
+ 2. 각 알고리즘별 설정 추가
+
+ <!-- Canny Settings -->
+ <div class="subsettings" id="cannySettings">
+     <div class="setting-row">
+         <label>Gaussian Sigma:</label>
+         <input type="number" id="cannySigma" value="1.4" min="0.5" max="5" step="0.1">
+     </div>
+     <div class="setting-row">
+         <label>Low Threshold:</label>
+         <input type="number" id="cannyLow" value="20" min="1" max="100">
+     </div>
+     <div class="setting-row">
+         <label>High Threshold:</label>
+         <input type="number" id="cannyHigh" value="50" min="10" max="200">
+     </div>
+ </div>
+
+ <!-- Adaptive Settings -->
+ <div class="subsettings hidden" id="adaptiveSettings">
+     <div class="setting-row">
+         <label>Block Size:</label>
+         <input type="number" id="adaptiveBlock" value="31" min="3" max="101" step="2">
+     </div>
+     <div class="setting-row">
+         <label>Constant C:</label>
+         <input type="number" id="adaptiveC" value="10" min="-50" max="50">
+     </div>
+ </div>
+
+ <!-- Sobel Settings -->
+ <div class="subsettings hidden" id="sobelSettings">
+     <div class="setting-row">
+         <label>Gradient Threshold:</label>
+         <input type="number" id="sobelThreshold" value="30" min="5" max="100">
+     </div>
+ </div>
+
+ 3. 알고리즘 구현 (index.html에서 포팅)
+
+ 3.1 Canny Edge Detection
+
+ - generateGaussianKernel() - Gaussian blur 커널 생성
+ - applyGaussianBlur() - 블러 적용
+ - computeGradients() - Sobel gradient 계산
+ - nonMaximumSuppression() - edge thinning
+ - hysteresisThreshold() - 이중 threshold
+ - findEdgeAlongRay() - edge map에서 ray로 첫 edge 찾기
+
+ 3.2 Adaptive Threshold
+
+ - computeIntegralImage() - integral image 생성
+ - getLocalMean() - 지역 평균 계산
+ - computeAdaptiveBinary() - adaptive binary map
+ - findInnerEdge() - binary map에서 edge 찾기
+
+ 3.3 Sobel Gradient (신규)
+
+ - ray를 따라 gradient magnitude 계산
+ - gradient peak 위치를 edge로 판정
+ - 절대 threshold가 아닌 상대적 변화로 감지
+
+ 4. extractBoundary() 함수 수정
+
+ function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
+     const method = document.getElementById('edgeMethod').value;
+
+     switch (method) {
+         case 'ray':
+             return extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg);
+         case 'canny':
+             return extractBoundaryCanny(img, directionDeg, rangeDeg, stepDeg);
+         case 'adaptive':
+             return extractBoundaryAdaptive(img, directionDeg, rangeDeg, stepDeg);
+         case 'sobel':
+             return extractBoundarySobel(img, directionDeg, rangeDeg, stepDeg);
+     }
+ }
+
+ 5. 문제 진단 도움말 추가
+
+ Settings help-text 수정:
+ ⚠️ 모든 점이 시작점 근처에 모여있다면:
+ • Ray 방식: 시작점을 어두운(trench 내부) 영역으로 이동
+ • Canny: High Threshold 낮춤 (권장: 30-50)
+ • Adaptive: Block Size 증가 (권장: 31-51), C 값 조정
+ • Sobel: Gradient Threshold 낮춤 (권장: 20-40)
+
+ 6. 노란색 점 표시 (이미 구현됨)
+
+ redrawCanvas()에서 filteredBoundary 점에 노란색 점 표시 - 완료
+
+ ---
+ 수정 파일
+
+ | File                       | 변경 내용
+             |
+ |----------------------------|------------------------------------------------------------------
+ ------------|
+ | trench-bucket-scanner.html | Edge Method 선택 UI, 알고리즘별 설정, Canny/Adaptive/Sobel 함수
+ 포팅, 도움말 |
+
+ ---
+ 구현 순서
+
+ 1. Edge Method 선택 드롭다운 추가
+ 2. 각 방식별 설정 UI 추가
+ 3. Canny 함수들 포팅 (index.html → trench-bucket-scanner.html)
+ 4. Adaptive 함수들 포팅
+ 5. Sobel gradient 방식 신규 구현
+ 6. extractBoundary() 분기 처리
+ 7. 문제 진단 도움말 텍스트 추가
+ 8. 설정 변경 이벤트 리스너 연결
+
+## Q
+원하는 건 1) 못 찾으면 변수 수정 가이드 텍스트 추가 2) edge 찾은 지점에 노란점 표시
+기존에 ray로 했더니 잘 안 되어서 다른 방식의 알고리즘을 찾고 있습니다. 여러 방식을 
+시도해주세요 
+
+## A
+index.html에 이미 Canny와 Adaptive edge detection이 구현되어 있네요. 이들을
+  trench-bucket-scanner에 포팅하고, 추가로 Sobel gradient 방식도 추가하겠습니다.
+
+구현 완료 요약
+
+  1. Edge Method 선택 드롭다운 추가 (라인 381-388)
+
+  - Ray (Threshold): 기존 방식 - 밝기 threshold로 edge 감지
+  - Canny Edge: Gaussian blur → Sobel gradient → Non-max suppression → Hysteresis
+  - Adaptive Threshold: 지역 평균 기반 binary threshold
+  - Sobel Gradient: Ray를 따라 gradient peak 위치 감지
+
+  2. 각 방식별 설정 UI (라인 405-454)
+
+  - Ray: Threshold Factor (× global mean)
+  - Canny: Gaussian Sigma, Low/High Threshold
+  - Adaptive: Block Size, Constant C
+  - Sobel: Gradient Threshold
+
+  3. 문제 진단 도움말 (라인 456-463)
+
+  ⚠️ 모든 점이 시작점 근처에 모여있다면:
+  • Ray: 시작점을 어두운(trench 내부) 영역으로 이동, Threshold Factor ↑
+  • Canny: High Threshold ↓ (권장: 30-50), Sigma ↑
+  • Adaptive: Block Size ↑ (권장: 31-51), Constant C ↓
+  • Sobel: Gradient Threshold ↓ (권장: 20-40)
+
+  4. Edge Detection 알고리즘 구현 (라인 853-1312)
+
+  - extractBoundary() - 메소드 라우터
+  - extractBoundaryRay() - 기존 Ray 방식
+  - extractBoundaryCanny() - Canny edge detection
+  - extractBoundaryAdaptive() - Adaptive threshold
+  - extractBoundarySobel() - Sobel gradient peak 감지
+
+  5. 이벤트 리스너 및 UI 토글 (라인 2263-2325)
+
+  - 파라미터 변경 시 자동 재측정
+  - Edge Method 변경 시 해당 설정 패널 표시/숨김

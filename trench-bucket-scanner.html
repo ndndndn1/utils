@@ -379,6 +379,15 @@
             <div class="settings-section">
                 <h4>Boundary Direction</h4>
                 <div class="setting-row">
+                    <label>Edge Method:</label>
+                    <select id="edgeMethod" onchange="updateEdgeMethodSettings()">
+                        <option value="ray">Ray (Threshold)</option>
+                        <option value="canny">Canny Edge</option>
+                        <option value="adaptive">Adaptive Threshold</option>
+                        <option value="sobel">Sobel Gradient</option>
+                    </select>
+                </div>
+                <div class="setting-row">
                     <label>Direction Angle (deg):</label>
                     <input type="number" id="directionAngle" value="180" min="0" max="359">
                     <span class="info-badge">Main direction to scan</span>
@@ -391,6 +400,66 @@
                 <div class="setting-row">
                     <label>Angle Step (deg):</label>
                     <input type="number" id="angleStep" value="1" min="0.5" max="5" step="0.5">
+                </div>
+
+                <!-- Ray Settings -->
+                <div class="subsettings" id="raySettings">
+                    <div class="setting-row">
+                        <label>Threshold Factor:</label>
+                        <input type="number" id="rayThreshold" value="1.0" min="0.5" max="2.0" step="0.1">
+                        <span class="info-badge">× global mean</span>
+                    </div>
+                </div>
+
+                <!-- Canny Settings -->
+                <div class="subsettings hidden" id="cannyEdgeSettings">
+                    <div class="setting-row">
+                        <label>Gaussian Sigma:</label>
+                        <input type="number" id="cannySigma" value="1.4" min="0.5" max="5" step="0.1">
+                        <span class="info-badge">Blur strength (권장: 1.0-2.0)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Low Threshold:</label>
+                        <input type="number" id="cannyLow" value="20" min="1" max="100">
+                        <span class="info-badge">Weak edge (권장: 10-30)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>High Threshold:</label>
+                        <input type="number" id="cannyHigh" value="50" min="10" max="200">
+                        <span class="info-badge">Strong edge (권장: 30-80)</span>
+                    </div>
+                </div>
+
+                <!-- Adaptive Settings -->
+                <div class="subsettings hidden" id="adaptiveEdgeSettings">
+                    <div class="setting-row">
+                        <label>Block Size:</label>
+                        <input type="number" id="adaptiveBlock" value="31" min="3" max="101" step="2">
+                        <span class="info-badge">Local area (권장: 21-51, 홀수)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Constant C:</label>
+                        <input type="number" id="adaptiveC" value="10" min="-50" max="50">
+                        <span class="info-badge">Sensitivity (권장: 5-20)</span>
+                    </div>
+                </div>
+
+                <!-- Sobel Settings -->
+                <div class="subsettings hidden" id="sobelEdgeSettings">
+                    <div class="setting-row">
+                        <label>Gradient Threshold:</label>
+                        <input type="number" id="sobelThreshold" value="30" min="5" max="100">
+                        <span class="info-badge">Edge strength (권장: 20-50)</span>
+                    </div>
+                </div>
+
+                <!-- Troubleshooting Help -->
+                <div class="help-text" style="margin-top: 10px; padding: 10px; background: #1a1a2e; border-radius: 5px; font-size: 11px; color: #888;">
+                    <strong style="color: #ffcc00;">⚠️ 모든 점이 시작점 근처에 모여있다면:</strong><br>
+                    • <strong>Ray</strong>: 시작점을 어두운(trench 내부) 영역으로 이동, Threshold Factor ↑<br>
+                    • <strong>Canny</strong>: High Threshold ↓ (권장: 30-50), Sigma ↑<br>
+                    • <strong>Adaptive</strong>: Block Size ↑ (권장: 31-51), Constant C ↓<br>
+                    • <strong>Sobel</strong>: Gradient Threshold ↓ (권장: 20-40)
                 </div>
             </div>
 
@@ -791,12 +860,33 @@
         }
 
         // ============================================
-        // BOUNDARY EXTRACTION
+        // BOUNDARY EXTRACTION (Method Router)
         // ============================================
         function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
+            const method = document.getElementById('edgeMethod').value;
+
+            switch (method) {
+                case 'ray':
+                    return extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg);
+                case 'canny':
+                    return extractBoundaryCanny(img, directionDeg, rangeDeg, stepDeg);
+                case 'adaptive':
+                    return extractBoundaryAdaptive(img, directionDeg, rangeDeg, stepDeg);
+                case 'sobel':
+                    return extractBoundarySobel(img, directionDeg, rangeDeg, stepDeg);
+                default:
+                    return extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg);
+            }
+        }
+
+        // ============================================
+        // RAY-CASTING EDGE DETECTION
+        // ============================================
+        function extractBoundaryRay(img, directionDeg, rangeDeg, stepDeg) {
             const { startPoint, grayData, width, height, globalMean } = img;
             const results = [];
-            const threshold = globalMean;
+            const thresholdFactor = parseFloat(document.getElementById('rayThreshold').value) || 1.0;
+            const threshold = globalMean * thresholdFactor;
 
             const startAngle = directionDeg - rangeDeg;
             const endAngle = directionDeg + rangeDeg;
@@ -828,6 +918,402 @@
                         });
                         break;
                     }
+                }
+            }
+
+            return results;
+        }
+
+        // ============================================
+        // CANNY EDGE DETECTION
+        // ============================================
+        function generateGaussianKernel(sigma) {
+            let size = Math.ceil(sigma * 6) | 1;
+            if (size < 3) size = 3;
+
+            const kernel = [];
+            const center = Math.floor(size / 2);
+            let sum = 0;
+
+            for (let y = 0; y < size; y++) {
+                const row = [];
+                for (let x = 0; x < size; x++) {
+                    const dx = x - center;
+                    const dy = y - center;
+                    const value = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+                    row.push(value);
+                    sum += value;
+                }
+                kernel.push(row);
+            }
+
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    kernel[y][x] /= sum;
+                }
+            }
+            return kernel;
+        }
+
+        function applyGaussianBlur(grayData, width, height, sigma) {
+            const kernel = generateGaussianKernel(sigma);
+            const kSize = kernel.length;
+            const kHalf = Math.floor(kSize / 2);
+            const result = new Float32Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let sum = 0;
+                    let weightSum = 0;
+
+                    for (let ky = 0; ky < kSize; ky++) {
+                        for (let kx = 0; kx < kSize; kx++) {
+                            const px = x + kx - kHalf;
+                            const py = y + ky - kHalf;
+
+                            if (px >= 0 && px < width && py >= 0 && py < height) {
+                                const weight = kernel[ky][kx];
+                                sum += grayData[py * width + px] * weight;
+                                weightSum += weight;
+                            }
+                        }
+                    }
+                    result[y * width + x] = sum / weightSum;
+                }
+            }
+            return result;
+        }
+
+        function computeGradients(blurredData, width, height) {
+            const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+            const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+
+            const gradientMagnitude = new Float32Array(width * height);
+            const gradientDirection = new Float32Array(width * height);
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let gx = 0, gy = 0;
+
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const pixel = blurredData[(y + ky) * width + (x + kx)];
+                            gx += pixel * sobelX[ky + 1][kx + 1];
+                            gy += pixel * sobelY[ky + 1][kx + 1];
+                        }
+                    }
+
+                    const idx = y * width + x;
+                    gradientMagnitude[idx] = Math.sqrt(gx * gx + gy * gy);
+                    gradientDirection[idx] = Math.atan2(gy, gx);
+                }
+            }
+            return { gradientMagnitude, gradientDirection };
+        }
+
+        function nonMaximumSuppression(gradientMagnitude, gradientDirection, width, height) {
+            const result = new Float32Array(width * height);
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    const magnitude = gradientMagnitude[idx];
+                    if (magnitude === 0) continue;
+
+                    let angle = gradientDirection[idx] * 180 / Math.PI;
+                    if (angle < 0) angle += 180;
+
+                    let neighbor1, neighbor2;
+
+                    if ((angle >= 0 && angle < 22.5) || (angle >= 157.5 && angle <= 180)) {
+                        neighbor1 = gradientMagnitude[y * width + (x - 1)];
+                        neighbor2 = gradientMagnitude[y * width + (x + 1)];
+                    } else if (angle >= 22.5 && angle < 67.5) {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + (x + 1)];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + (x - 1)];
+                    } else if (angle >= 67.5 && angle < 112.5) {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + x];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + x];
+                    } else {
+                        neighbor1 = gradientMagnitude[(y - 1) * width + (x - 1)];
+                        neighbor2 = gradientMagnitude[(y + 1) * width + (x + 1)];
+                    }
+
+                    if (magnitude >= neighbor1 && magnitude >= neighbor2) {
+                        result[idx] = magnitude;
+                    }
+                }
+            }
+            return result;
+        }
+
+        function hysteresisThreshold(suppressedData, width, height, lowThreshold, highThreshold) {
+            const edges = new Uint8Array(width * height);
+            const WEAK = 128;
+            const STRONG = 255;
+
+            for (let i = 0; i < suppressedData.length; i++) {
+                if (suppressedData[i] >= highThreshold) {
+                    edges[i] = STRONG;
+                } else if (suppressedData[i] >= lowThreshold) {
+                    edges[i] = WEAK;
+                }
+            }
+
+            const queue = [];
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    if (edges[y * width + x] === STRONG) {
+                        queue.push({ x, y });
+                    }
+                }
+            }
+
+            while (queue.length > 0) {
+                const { x, y } = queue.shift();
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const nIdx = ny * width + nx;
+                            if (edges[nIdx] === WEAK) {
+                                edges[nIdx] = STRONG;
+                                queue.push({ x: nx, y: ny });
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (let i = 0; i < edges.length; i++) {
+                if (edges[i] !== STRONG) edges[i] = 0;
+            }
+            return edges;
+        }
+
+        function performCannyEdgeDetection(grayData, width, height, sigma, lowThreshold, highThreshold) {
+            const blurred = applyGaussianBlur(grayData, width, height, sigma);
+            const { gradientMagnitude, gradientDirection } = computeGradients(blurred, width, height);
+            const suppressed = nonMaximumSuppression(gradientMagnitude, gradientDirection, width, height);
+            const edges = hysteresisThreshold(suppressed, width, height, lowThreshold, highThreshold);
+            return edges;
+        }
+
+        function extractBoundaryCanny(img, directionDeg, rangeDeg, stepDeg) {
+            const { startPoint, grayData, width, height } = img;
+            const results = [];
+
+            const sigma = parseFloat(document.getElementById('cannySigma').value) || 1.4;
+            const lowThreshold = parseFloat(document.getElementById('cannyLow').value) || 20;
+            const highThreshold = parseFloat(document.getElementById('cannyHigh').value) || 50;
+
+            const edgeMap = performCannyEdgeDetection(grayData, width, height, sigma, lowThreshold, highThreshold);
+            img.edgeMap = edgeMap;
+
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+
+                for (let r = 1; r < maxRadius; r++) {
+                    const x = Math.round(startPoint.x + r * dx);
+                    const y = Math.round(startPoint.y + r * dy);
+
+                    if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) break;
+
+                    if (edgeMap[y * width + x] === 255) {
+                        results.push({
+                            angle: angle,
+                            radius: r,
+                            x: startPoint.x + r * dx,
+                            y: startPoint.y + r * dy,
+                            intensity: grayData[y * width + x]
+                        });
+                        break;
+                    }
+                }
+            }
+
+            return results;
+        }
+
+        // ============================================
+        // ADAPTIVE THRESHOLD EDGE DETECTION
+        // ============================================
+        function computeIntegralImage(grayData, width, height) {
+            const integral = new Float64Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                let rowSum = 0;
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    rowSum += grayData[idx];
+                    integral[idx] = rowSum + (y > 0 ? integral[(y - 1) * width + x] : 0);
+                }
+            }
+            return integral;
+        }
+
+        function getLocalMean(integral, width, height, x, y, blockRadius) {
+            const x1 = Math.max(0, x - blockRadius);
+            const y1 = Math.max(0, y - blockRadius);
+            const x2 = Math.min(width - 1, x + blockRadius);
+            const y2 = Math.min(height - 1, y + blockRadius);
+
+            const A = (y1 > 0 && x1 > 0) ? integral[(y1 - 1) * width + (x1 - 1)] : 0;
+            const B = (y1 > 0) ? integral[(y1 - 1) * width + x2] : 0;
+            const C = (x1 > 0) ? integral[y2 * width + (x1 - 1)] : 0;
+            const D = integral[y2 * width + x2];
+
+            const sum = D - B - C + A;
+            const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+            return sum / count;
+        }
+
+        function computeAdaptiveBinary(grayData, integral, width, height, blockSize, C) {
+            const blockRadius = Math.floor(blockSize / 2);
+            const binary = new Uint8Array(width * height);
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    const localMean = getLocalMean(integral, width, height, x, y, blockRadius);
+                    const threshold = localMean - C;
+                    binary[idx] = grayData[idx] > threshold ? 255 : 0;
+                }
+            }
+            return binary;
+        }
+
+        function extractBoundaryAdaptive(img, directionDeg, rangeDeg, stepDeg) {
+            const { startPoint, grayData, width, height } = img;
+            const results = [];
+
+            const blockSize = parseInt(document.getElementById('adaptiveBlock').value) || 31;
+            const thresholdC = parseFloat(document.getElementById('adaptiveC').value) || 10;
+
+            const integral = computeIntegralImage(grayData, width, height);
+            const binary = computeAdaptiveBinary(grayData, integral, width, height, blockSize, thresholdC);
+            img.edgeMap = binary;
+
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+
+            let prevVal = binary[Math.round(startPoint.y) * width + Math.round(startPoint.x)];
+
+            for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+                const maxRadius = Math.ceil(Math.hypot(
+                    Math.max(startPoint.x, width - startPoint.x),
+                    Math.max(startPoint.y, height - startPoint.y)
+                ));
+
+                prevVal = binary[Math.round(startPoint.y) * width + Math.round(startPoint.x)];
+
+                for (let r = 1; r < maxRadius; r++) {
+                    const x = Math.round(startPoint.x + r * dx);
+                    const y = Math.round(startPoint.y + r * dy);
+
+                    if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+                    const currVal = binary[y * width + x];
+
+                    // Transition from dark (0) to white (255) = edge
+                    if (prevVal === 0 && currVal === 255) {
+                        results.push({
+                            angle: angle,
+                            radius: r,
+                            x: startPoint.x + r * dx,
+                            y: startPoint.y + r * dy,
+                            intensity: grayData[y * width + x]
+                        });
+                        break;
+                    }
+                    prevVal = currVal;
+                }
+            }
+
+            return results;
+        }
+
+        // ============================================
+        // SOBEL GRADIENT EDGE DETECTION
+        // ============================================
+        function extractBoundarySobel(img, directionDeg, rangeDeg, stepDeg) {
+            const { startPoint, grayData, width, height } = img;
+            const results = [];
+
+            const gradientThreshold = parseFloat(document.getElementById('sobelThreshold').value) || 30;
+
+            // Compute Sobel gradients for entire image
+            const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+            const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+            const gradientMagnitude = new Float32Array(width * height);
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let gx = 0, gy = 0;
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const pixel = grayData[(y + ky) * width + (x + kx)];
+                            gx += pixel * sobelX[ky + 1][kx + 1];
+                            gy += pixel * sobelY[ky + 1][kx + 1];
+                        }
+                    }
+                    gradientMagnitude[y * width + x] = Math.sqrt(gx * gx + gy * gy);
+                }
+            }
+
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+
+                // Find peak gradient along ray
+                let maxGrad = 0;
+                let maxR = 0;
+
+                for (let r = 3; r < maxRadius; r++) {
+                    const x = Math.round(startPoint.x + r * dx);
+                    const y = Math.round(startPoint.y + r * dy);
+
+                    if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) break;
+
+                    const grad = gradientMagnitude[y * width + x];
+                    if (grad > maxGrad && grad >= gradientThreshold) {
+                        maxGrad = grad;
+                        maxR = r;
+                    }
+                }
+
+                if (maxR > 0) {
+                    const x = startPoint.x + maxR * dx;
+                    const y = startPoint.y + maxR * dy;
+                    results.push({
+                        angle: angle,
+                        radius: maxR,
+                        x: x,
+                        y: y,
+                        intensity: grayData[Math.round(y) * width + Math.round(x)]
+                    });
                 }
             }
 
@@ -1782,7 +2268,12 @@
                 'directionAngle', 'scanRange', 'angleStep',
                 'sigmaThreshold', 'matchThreshold',
                 'fftCutoff', 'maxDerivative',
-                'ransacIterations', 'ransacThreshold', 'polyDegree'
+                'ransacIterations', 'ransacThreshold', 'polyDegree',
+                // Edge method specific params
+                'edgeMethod', 'rayThreshold',
+                'cannySigma', 'cannyLow', 'cannyHigh',
+                'adaptiveBlock', 'adaptiveC',
+                'sobelThreshold'
             ];
 
             params.forEach(id => {
@@ -1800,8 +2291,38 @@
             });
         }
 
+        // ============================================
+        // EDGE METHOD SETTINGS TOGGLE
+        // ============================================
+        function updateEdgeMethodSettings() {
+            const method = document.getElementById('edgeMethod').value;
+
+            // Hide all method settings
+            document.getElementById('raySettings').classList.add('hidden');
+            document.getElementById('cannyEdgeSettings').classList.add('hidden');
+            document.getElementById('adaptiveEdgeSettings').classList.add('hidden');
+            document.getElementById('sobelEdgeSettings').classList.add('hidden');
+
+            // Show selected method settings
+            switch (method) {
+                case 'ray':
+                    document.getElementById('raySettings').classList.remove('hidden');
+                    break;
+                case 'canny':
+                    document.getElementById('cannyEdgeSettings').classList.remove('hidden');
+                    break;
+                case 'adaptive':
+                    document.getElementById('adaptiveEdgeSettings').classList.remove('hidden');
+                    break;
+                case 'sobel':
+                    document.getElementById('sobelEdgeSettings').classList.remove('hidden');
+                    break;
+            }
+        }
+
         // Initialize on page load
         setupParameterListeners();
+        updateEdgeMethodSettings();
     </script>
 </body>
 </html>
