@@ -1323,3 +1323,38 @@ edge mask 작성 시
   1)시작점에서 지정한 scan direction 방향이 edge 인식 대상입니다. 나머지 방향은 참조만 함 
   2)mask brush size가 너무 큽니다. 조절 가능하게 하고, vector 기반으로 photoshop 과 같은 '편의성 높은'
   베지어 곡선 도구도 지원해주세요
+
+## A
+1. Scan Direction Guide (스캔 방향 가이드)
+
+  - 시작점 설정 시 노란색 부채꼴 영역으로 edge 인식 대상 방향 표시
+  - 중앙 방향선 (점선)과 각도 표시 (90° ±90°)
+  - Show Scan Direction Guide 체크박스로 on/off 가능
+
+  2. Brush Size 조정
+
+  - 기본값: 10px → 3px
+  - 범위: 2-50px → 1-30px
+
+  3. Bezier Curve Tool (베지어 곡선 도구)
+
+  - [Bezier] 버튼 클릭 → 곡선 모드 활성화
+  - 클릭: 앵커 포인트 추가 (분홍색 점)
+  - 더블클릭: 곡선 완료 및 마스크에 적용
+  - Catmull-Rom 스플라인 보간으로 부드러운 곡선 생성
+  - 곡선이 brush size 두께로 마스크에 래스터화됨
+
+  사용 흐름
+
+  1. 이미지 클릭 → 시작점 설정 (노란 부채꼴 가이드 표시)
+  2. [Bezier] 클릭 → 곡선 모드
+  3. edge 라인을 따라 클릭으로 점 추가
+  4. 더블클릭 → 곡선 완료
+  5. [Apply Mask] → 마스크 기반 경계 추출
+  
+## Q
+1) 인식 대상에서  방향 표시가 중요한 게 아니라, 해당 방향 영역만 인식하고 나머지는 제외합니다
+  'debug/scan direction_OX.png' 참조
+  2) bezier closed 시 bezier 곡선 안쪽을 mask로 합니다 (no path brush)
+  3) mask 영역을 무시하는 문제. statistical model에서 init 은 인식 방향을 결정하는 시작점일뿐 해당
+  픽셀값을 참조하는 것이 아닙니다.

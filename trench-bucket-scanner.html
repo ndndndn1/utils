@@ -621,9 +621,10 @@
                         1. 이미지 클릭 → 시작점 설정<br>
                         2. [Auto Detect] → Edge 자동 감지<br>
                         3. [Draw]/[Erase] → 브러시로 마스크 수정<br>
-                        4. [Bezier] → 곡선 도구 (클릭으로 점 추가, 더블클릭 완료)<br>
-                        5. [Apply Mask] → 마스크 기반 경계 추출<br>
-                        <span style="color: #ffaa00;">※ 노란 부채꼴 영역 = Scan Direction (경계 추출 대상)</span>
+                        4. [Bezier] → 곡선 도구 (3점 이상 클릭 → 더블클릭으로 <strong>내부 채우기</strong>)<br>
+                        5. [Apply Mask] 또는 일반 Detect 실행<br>
+                        <span style="color: #ffaa00;">※ 노란 부채꼴 영역만 경계 추출 대상 (바깥 무시)</span><br>
+                        <span style="color: #00ff88;">※ Mask 활성화 시 모든 알고리즘에서 마스크 사용</span>
                     </p>
                 </div>
             </div>
@@ -1392,34 +1393,28 @@
 
             const ctx = img.maskCtx;
 
-            // Draw completed curves
+            // Draw completed curves (filled)
             for (const curve of img.bezierCurves) {
-                if (curve.length < 2) continue;
+                if (curve.length < 3) continue;
 
-                ctx.beginPath();
-                ctx.moveTo(curve[0].x, curve[0].y);
-
-                if (curve.length === 2) {
-                    ctx.lineTo(curve[1].x, curve[1].y);
-                } else {
-                    // Draw smooth curve through points using cardinal spline
-                    for (let i = 0; i < curve.length - 1; i++) {
-                        const p0 = curve[Math.max(0, i - 1)];
-                        const p1 = curve[i];
-                        const p2 = curve[i + 1];
-                        const p3 = curve[Math.min(curve.length - 1, i + 2)];
-
-                        const cp1x = p1.x + (p2.x - p0.x) / 6;
-                        const cp1y = p1.y + (p2.y - p0.y) / 6;
-                        const cp2x = p2.x - (p3.x - p1.x) / 6;
-                        const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-                        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-                    }
+                // Generate smooth curve points
+                const curvePoints = [];
+                for (let t = 0; t <= 1; t += 0.02) {
+                    curvePoints.push(getCurvePointFromArray(curve, t));
                 }
 
-                ctx.strokeStyle = 'rgba(0, 255, 0, 1)';
-                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(curvePoints[0].x, curvePoints[0].y);
+                for (let i = 1; i < curvePoints.length; i++) {
+                    ctx.lineTo(curvePoints[i].x, curvePoints[i].y);
+                }
+                ctx.closePath();
+
+                // Fill with semi-transparent green
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.lineWidth = 2;
                 ctx.stroke();
             }
 
@@ -1468,47 +1463,60 @@
 
         function finalizeBezierCurve(index) {
             const img = state.images[index];
-            if (!img || img.bezierPoints.length < 2) {
+            if (!img || img.bezierPoints.length < 3) {
+                // Need at least 3 points to form a closed area
                 if (img) img.bezierPoints = [];
                 renderMaskToCanvas(index);
+                updateStatus('최소 3개 이상의 점이 필요합니다.');
                 return;
             }
 
-            // Convert bezier curve to mask data
+            // Convert bezier curve to mask data - FILL INTERIOR
             const points = img.bezierPoints;
             img.bezierCurves.push([...points]);
 
-            // Rasterize the curve to mask
+            // Initialize mask data if needed
             if (!img.maskData) {
                 img.maskData = new Uint8Array(img.width * img.height);
             }
 
-            const brushSize = parseInt(document.getElementById('maskBrushSize').value) || 3;
+            // Generate smooth curve points for polygon
+            const curvePoints = [];
+            for (let t = 0; t <= 1; t += 0.01) {
+                curvePoints.push(getCurvePoint(points, t));
+            }
+            // Close the curve
+            curvePoints.push(curvePoints[0]);
 
-            // Draw curve points to mask
-            for (let t = 0; t <= 1; t += 0.005) {
-                const point = getCurvePoint(points, t);
-                const x = Math.round(point.x);
-                const y = Math.round(point.y);
+            // Use canvas to fill the polygon and extract pixel data
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = img.width;
+            tempCanvas.height = img.height;
+            const tempCtx = tempCanvas.getContext('2d');
 
-                // Fill brush area
-                for (let dy = -brushSize; dy <= brushSize; dy++) {
-                    for (let dx = -brushSize; dx <= brushSize; dx++) {
-                        if (dx * dx + dy * dy <= brushSize * brushSize) {
-                            const px = x + dx;
-                            const py = y + dy;
-                            if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
-                                img.maskData[py * img.width + px] = 255;
-                            }
-                        }
-                    }
+            // Draw filled polygon
+            tempCtx.beginPath();
+            tempCtx.moveTo(curvePoints[0].x, curvePoints[0].y);
+            for (let i = 1; i < curvePoints.length; i++) {
+                tempCtx.lineTo(curvePoints[i].x, curvePoints[i].y);
+            }
+            tempCtx.closePath();
+            tempCtx.fillStyle = 'white';
+            tempCtx.fill();
+
+            // Extract filled area to mask data
+            const filledData = tempCtx.getImageData(0, 0, img.width, img.height);
+            for (let i = 0; i < img.maskData.length; i++) {
+                // Check alpha channel (index * 4 + 3)
+                if (filledData.data[i * 4 + 3] > 0) {
+                    img.maskData[i] = 255;
                 }
             }
 
             img.bezierPoints = [];
             renderMaskToCanvas(index);
             updateMaskStatus(index);
-            updateStatus(`Bezier curve added to mask. Double-click to finish, click to continue.`);
+            updateStatus(`Bezier 영역이 마스크에 추가되었습니다 (내부 채우기).`);
         }
 
         function getCurvePoint(points, t) {
@@ -1534,6 +1542,33 @@
             const t3 = t2 * localT;
 
             // Catmull-Rom spline
+            return {
+                x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * localT + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+                y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * localT + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+            };
+        }
+
+        function getCurvePointFromArray(points, t) {
+            if (points.length < 2) return points[0] || { x: 0, y: 0 };
+            if (points.length === 2) {
+                return {
+                    x: points[0].x + t * (points[1].x - points[0].x),
+                    y: points[0].y + t * (points[1].y - points[0].y)
+                };
+            }
+
+            const n = points.length - 1;
+            const segment = Math.min(Math.floor(t * n), n - 1);
+            const localT = (t * n) - segment;
+
+            const p0 = points[Math.max(0, segment - 1)];
+            const p1 = points[segment];
+            const p2 = points[segment + 1];
+            const p3 = points[Math.min(n, segment + 2)];
+
+            const t2 = localT * localT;
+            const t3 = t2 * localT;
+
             return {
                 x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * localT + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
                 y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * localT + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
@@ -1637,6 +1672,13 @@
         // ============================================
         function extractBoundary(img, directionDeg, rangeDeg, stepDeg) {
             const algorithm = document.getElementById('mainAlgorithm').value;
+
+            // Check if mask mode is enabled and image has mask data
+            const useMask = document.getElementById('useMaskGuide')?.checked;
+            if (useMask && img.maskData && img.maskData.some(v => v > 0)) {
+                // Use mask-based extraction (respects scan direction automatically)
+                return extractBoundaryFromMask(img, directionDeg, rangeDeg, stepDeg);
+            }
 
             // For Edge Detection algorithms, use directly
             // For Shape Learning algorithms, use Ray as base extraction method
