@@ -1245,4 +1245,44 @@ model 학습을 하지 않는 알고리즘도 있는데 그 경우 Build models 
   - Edge Detection 선택 시 Training 모드 불필요
   - 파라미터 변경 시 자동 re-detect 기능 유지
 
-  
+#20205.12.15
+## Q
+trainin training required model 에서도 detect 기능 추가. 모든 점이 근처에 모여있다면 가이드 안내
+
+## A
+변경 사항
+
+  1. Training Mode에 "Detect (Preview)" 버튼 추가
+
+  - 위치: trench-bucket-scanner.html:365
+  - "Build Models" 버튼 다음에 "4. Detect (Preview)" 버튼 추가
+  - 모델이 빌드된 후 Training 이미지에서 바로 Detection 테스트 가능
+
+  2. detectTrainingPreview() 함수 추가 (line 1960)
+
+  - Training Mode 이미지에서 학습된 모델로 Detection 실행
+  - Statistical, Template, Neural 알고리즘 모두 지원
+  - 결과를 미리보기로 표시
+
+  3. Clustered Points 체크 기능 추가
+
+  checkClusteredPoints() 함수 (line 1920):
+  - 모든 점의 평균 반경 < 15px 또는 반경 범위 < 10px 인 경우 "clustered"로 판정
+  - 반경 통계 정보 반환 (mean, max, min, range)
+
+  showClusteredWarning() 함수 (line 1942):
+  - 알고리즘별 맞춤 해결 방법 안내
+  - 알림창으로 사용자에게 파라미터 조정 가이드 제공
+
+  4. 기존 함수 업데이트
+
+  - extractAllBoundaries(): 경계 추출 시 clustered 체크 및 경고 표시
+  - detectAll(): Detection 시 clustered 체크 및 경고 표시
+  - updateButtons(): detectTrainingBtn 활성화 조건 추가 (모델 + 시작점 필요)
+
+  주요 기능
+
+  1. Training Required 모델(Statistical, Template, Neural)에서도 Training Mode에서 바로 Detection 미리보기 가능
+  2. 모든 점이 시작점 근처에 모여있으면:
+    - 각 이미지 미리보기에 빨간색 "⚠️ Clustered" 표시
+    - 모든 이미지가 clustered인 경우 알고리즘별 해결 방법 알림 표시

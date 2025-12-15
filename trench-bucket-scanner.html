@@ -362,6 +362,9 @@
             <button class="btn btn-success" id="buildModelBtn" onclick="buildModels()" disabled>
                 3. Build Models
             </button>
+            <button class="btn btn-primary" id="detectTrainingBtn" onclick="detectTrainingPreview()" disabled>
+                4. Detect (Preview)
+            </button>
             <button class="btn btn-secondary" id="saveModelBtn" onclick="saveModels()" disabled>
                 Save Models
             </button>
@@ -502,7 +505,7 @@
                 <h4>Scan Direction</h4>
                 <div class="setting-row">
                     <label>Direction Angle (deg):</label>
-                    <input type="number" id="directionAngle" value="180" min="0" max="359">
+                    <input type="number" id="directionAngle" value="90" min="0" max="359">
                     <span class="info-badge">Main direction to scan</span>
                 </div>
                 <div class="setting-row">
@@ -1331,6 +1334,7 @@
                 return;
             }
 
+            const algorithm = document.getElementById('mainAlgorithm').value;
             const directionDeg = parseFloat(document.getElementById('directionAngle').value);
             const rangeDeg = parseFloat(document.getElementById('scanRange').value);
             const stepDeg = parseFloat(document.getElementById('angleStep').value);
@@ -1342,6 +1346,8 @@
             state.trainingData.angleConfig = { directionDeg, rangeDeg, stepDeg };
 
             let processed = 0;
+            let clusteredCount = 0;
+
             for (let i = 0; i < state.images.length; i++) {
                 const img = state.images[i];
                 if (!img.startPoint || img.mode !== 'training') continue;
@@ -1352,11 +1358,21 @@
                     points: img.boundary
                 });
 
+                // Check for clustered points
+                const clusterCheck = checkClusteredPoints(img.boundary, img.startPoint);
+                if (clusterCheck.clustered) {
+                    clusteredCount++;
+                }
+
                 redrawCanvas(i);
 
                 const preview = document.getElementById(`preview-${i}`);
                 preview.style.display = 'block';
-                preview.innerHTML = `<strong>Boundary:</strong> ${img.boundary.length} points extracted`;
+                let previewHtml = `<strong>Boundary:</strong> ${img.boundary.length} points extracted`;
+                if (clusterCheck.clustered) {
+                    previewHtml += ` | <span style="color: #ff4444;">⚠️ Clustered (mean: ${clusterCheck.meanRadius.toFixed(1)}px)</span>`;
+                }
+                preview.innerHTML = previewHtml;
 
                 processed++;
                 updateProgress(processed / imagesWithPoints.length * 100);
@@ -1364,7 +1380,16 @@
             }
 
             showProgress(false);
-            updateStatus(`Extracted boundaries from ${processed} images. Ready to build models.`);
+
+            // Show clustered warning if all images have clustered points
+            if (clusteredCount > 0 && clusteredCount === processed) {
+                showClusteredWarning(algorithm);
+                updateStatus(`⚠️ 모든 이미지에서 점이 밀집되어 있습니다. 파라미터를 조정하세요.`);
+            } else if (clusteredCount > 0) {
+                updateStatus(`Extracted boundaries from ${processed} images. ⚠️ ${clusteredCount}개 이미지에서 점이 밀집됨. Ready to build models.`);
+            } else {
+                updateStatus(`Extracted boundaries from ${processed} images. Ready to build models.`);
+            }
             updateCounts();
             updateButtons();
         }
@@ -1890,6 +1915,144 @@
         }
 
         // ============================================
+        // CLUSTERED POINTS CHECK
+        // ============================================
+        function checkClusteredPoints(boundary, startPoint) {
+            if (!boundary || boundary.length === 0) return { clustered: false };
+
+            // Calculate statistics
+            const radii = boundary.map(p => p.radius);
+            const meanRadius = radii.reduce((a, b) => a + b, 0) / radii.length;
+            const maxRadius = Math.max(...radii);
+            const minRadius = Math.min(...radii);
+            const range = maxRadius - minRadius;
+
+            // Clustered if: mean radius < 15px OR range < 10px (all points very close together)
+            const clustered = meanRadius < 15 || range < 10;
+
+            return {
+                clustered,
+                meanRadius,
+                maxRadius,
+                minRadius,
+                range
+            };
+        }
+
+        function showClusteredWarning(algorithm) {
+            const tips = {
+                ray: 'Threshold Factor를 높이거나 시작점을 어두운(trench 내부) 영역으로 이동하세요.',
+                canny: 'High Threshold를 낮추세요 (권장: 30-50). Sigma를 높여보세요.',
+                adaptive: 'Block Size를 높이세요 (권장: 31-51). Constant C를 낮춰보세요.',
+                sobel: 'Gradient Threshold를 낮추세요 (권장: 20-40).',
+                statistical: 'Training 데이터의 시작점 위치를 확인하고, Ray 파라미터를 조정하세요.',
+                template: 'Training 데이터의 시작점 위치를 확인하고, Ray 파라미터를 조정하세요.',
+                neural: 'Training 데이터의 시작점 위치를 확인하고, Ray 파라미터를 조정하세요.'
+            };
+
+            const tip = tips[algorithm] || tips.ray;
+            alert(`⚠️ 모든 점이 시작점 근처에 모여있습니다!\n\nEdge detection이 제대로 작동하지 않았습니다.\n\n💡 해결 방법:\n${tip}`);
+        }
+
+        // ============================================
+        // TRAINING PREVIEW DETECTION
+        // ============================================
+        async function detectTrainingPreview() {
+            const trainingImages = state.images.filter(img => img.startPoint && img.mode === 'training');
+            if (trainingImages.length === 0) {
+                alert('Training 이미지에 시작점을 먼저 설정하세요.');
+                return;
+            }
+
+            const algorithm = document.getElementById('mainAlgorithm').value;
+            const hasModels = state.trainingData.meanProfile || state.trainingData.templates.length > 0;
+
+            if (!hasModels) {
+                alert('먼저 모델을 빌드하세요 (Build Models).');
+                return;
+            }
+
+            const filter = document.getElementById('noiseFilter').value;
+            const directionDeg = parseFloat(document.getElementById('directionAngle').value);
+            const rangeDeg = parseFloat(document.getElementById('scanRange').value);
+            const stepDeg = parseFloat(document.getElementById('angleStep').value);
+
+            updateStatus(`Training 이미지에서 ${algorithm} 모델로 Detection 미리보기 중...`);
+            showProgress(true);
+
+            let processed = 0;
+            let clusteredCount = 0;
+
+            for (let i = 0; i < state.images.length; i++) {
+                const img = state.images[i];
+                if (!img.startPoint || img.mode !== 'training') continue;
+
+                // Extract boundary using selected algorithm
+                img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
+
+                // Check for clustered points
+                const clusterCheck = checkClusteredPoints(img.boundary, img.startPoint);
+                if (clusterCheck.clustered) {
+                    clusteredCount++;
+                }
+
+                // Apply shape learning model filtering
+                let detectedBoundary = img.boundary;
+
+                if (algorithm === 'statistical' && state.trainingData.meanProfile) {
+                    const sigma = parseFloat(document.getElementById('sigmaThreshold').value);
+                    detectedBoundary = applyStatisticalFilter(img.boundary, {
+                        meanProfile: state.trainingData.meanProfile,
+                        stdProfile: state.trainingData.stdProfile,
+                        startAngle: state.trainingData.angleConfig.directionDeg - state.trainingData.angleConfig.rangeDeg,
+                        stepDeg: state.trainingData.angleConfig.stepDeg
+                    }, sigma);
+                }
+
+                if (algorithm === 'template' && state.trainingData.templates.length > 0) {
+                    const matchResult = matchTemplate(img.boundary, state.trainingData.templates);
+                    img.templateScore = matchResult.score;
+                }
+
+                // Apply noise filter
+                img.filteredBoundary = applyNoiseFilter(detectedBoundary, filter, img);
+
+                redrawCanvas(i);
+
+                const preview = document.getElementById(`preview-${i}`);
+                preview.style.display = 'block';
+                let previewHtml = `<strong>Algorithm:</strong> ${algorithm} | <strong>Detected:</strong> ${img.boundary.length} points`;
+                if (img.filteredBoundary) {
+                    previewHtml += ` | <strong>Filtered:</strong> ${img.filteredBoundary.length} points`;
+                }
+                if (img.templateScore !== undefined) {
+                    previewHtml += ` | <strong>Match:</strong> ${(img.templateScore * 100).toFixed(1)}%`;
+                }
+                if (clusterCheck.clustered) {
+                    previewHtml += ` | <span style="color: #ff4444;">⚠️ Clustered (mean: ${clusterCheck.meanRadius.toFixed(1)}px)</span>`;
+                }
+                preview.innerHTML = previewHtml;
+
+                processed++;
+                updateProgress(processed / trainingImages.length * 100);
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+
+            showProgress(false);
+
+            // Show clustered warning if all images have clustered points
+            if (clusteredCount > 0 && clusteredCount === processed) {
+                showClusteredWarning(algorithm);
+            } else if (clusteredCount > 0) {
+                updateStatus(`Detection 미리보기 완료. ${processed}개 이미지 처리됨. ⚠️ ${clusteredCount}개 이미지에서 점이 밀집됨.`);
+            } else {
+                updateStatus(`Detection 미리보기 완료. ${processed}개 이미지 처리됨.`);
+            }
+
+            updateButtons();
+        }
+
+        // ============================================
         // DETECTION
         // ============================================
         async function detectAll() {
@@ -1919,12 +2082,20 @@
             showProgress(true);
 
             let processed = 0;
+            let clusteredCount = 0;
+
             for (let i = 0; i < state.images.length; i++) {
                 const img = state.images[i];
                 if (!img.startPoint || img.mode !== 'detection') continue;
 
                 // Extract boundary using selected algorithm (edge detection method)
                 img.boundary = extractBoundary(img, directionDeg, rangeDeg, stepDeg);
+
+                // Check for clustered points
+                const clusterCheck = checkClusteredPoints(img.boundary, img.startPoint);
+                if (clusterCheck.clustered) {
+                    clusteredCount++;
+                }
 
                 // For Shape Learning algorithms, apply additional model-based filtering
                 let detectedBoundary = img.boundary;
@@ -1961,6 +2132,9 @@
                 if (img.templateScore !== undefined) {
                     previewHtml += ` | <strong>Match:</strong> ${(img.templateScore * 100).toFixed(1)}%`;
                 }
+                if (clusterCheck.clustered) {
+                    previewHtml += ` | <span style="color: #ff4444;">⚠️ Clustered (mean: ${clusterCheck.meanRadius.toFixed(1)}px)</span>`;
+                }
                 preview.innerHTML = previewHtml;
 
                 processed++;
@@ -1969,7 +2143,15 @@
             }
 
             showProgress(false);
-            updateStatus(`Detection complete. ${processed} images processed using ${algorithm}.`);
+
+            // Show clustered warning if all images have clustered points
+            if (clusteredCount > 0 && clusteredCount === processed) {
+                showClusteredWarning(algorithm);
+            } else if (clusteredCount > 0) {
+                updateStatus(`Detection complete. ${processed} images processed. ⚠️ ${clusteredCount} image(s) have clustered points.`);
+            } else {
+                updateStatus(`Detection complete. ${processed} images processed using ${algorithm}.`);
+            }
             updateButtons();
         }
 
@@ -2203,6 +2385,7 @@
             document.getElementById('extractBtn').disabled = !hasTrainingPoints;
             document.getElementById('buildModelBtn').disabled = !hasBoundaries;
             document.getElementById('saveModelBtn').disabled = !hasModels;
+            document.getElementById('detectTrainingBtn').disabled = !hasModels || !hasTrainingPoints;
 
             const hasDetectionPoints = detectionImages.some(img => img.startPoint);
             const hasDetectionResults = detectionImages.some(img => img.filteredBoundary?.length > 0);
