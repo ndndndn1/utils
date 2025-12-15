@@ -302,6 +302,51 @@
             margin-bottom: 5px;
             font-size: 12px;
         }
+        /* Mask overlay styles */
+        .canvas-container {
+            position: relative;
+        }
+        .mask-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+        .mask-canvas.editing {
+            pointer-events: auto;
+            cursor: crosshair;
+        }
+        .mask-controls {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .mask-controls button {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mask-controls button.active {
+            box-shadow: 0 0 5px #00d9ff;
+        }
+        .mask-btn-auto { background: #00d9ff; color: #1a1a2e; }
+        .mask-btn-draw { background: #00ff88; color: #1a1a2e; }
+        .mask-btn-erase { background: #ffaa00; color: #1a1a2e; }
+        .mask-btn-clear { background: #ff4444; color: white; }
+        .mask-btn-apply { background: #9933ff; color: white; }
+        .mask-status {
+            font-size: 10px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .mask-status.active {
+            color: #00ff88;
+        }
     </style>
 </head>
 <body>
@@ -519,6 +564,45 @@
                 </div>
             </div>
 
+            <!-- Mask Preprocessing Settings -->
+            <div class="settings-section">
+                <h4>Edge Mask (Preprocessing)</h4>
+                <div class="setting-row">
+                    <label>
+                        <input type="checkbox" id="useMaskGuide" onchange="toggleMaskMode()">
+                        Use Edge Mask Guide
+                    </label>
+                    <span class="info-badge">Training 모드 전처리용</span>
+                </div>
+                <div class="subsettings" id="maskSettings" style="display: none;">
+                    <div class="setting-row">
+                        <label>Auto-detect Method:</label>
+                        <select id="maskDetectMethod">
+                            <option value="canny">Canny Edge</option>
+                            <option value="sobel">Sobel Gradient</option>
+                            <option value="adaptive">Adaptive Threshold</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label>Mask Opacity:</label>
+                        <input type="range" id="maskOpacity" value="50" min="10" max="90" oninput="updateMaskOpacity()">
+                        <span id="maskOpacityValue">50%</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Brush Size:</label>
+                        <input type="number" id="maskBrushSize" value="10" min="2" max="50">
+                        <span class="info-badge">Draw/Erase brush size</span>
+                    </div>
+                    <p class="help-text" style="margin-top: 10px;">
+                        <strong style="color: #00d9ff;">사용법:</strong><br>
+                        1. 이미지 클릭 → 시작점 설정<br>
+                        2. [Auto Detect] → Edge 자동 감지<br>
+                        3. [Draw]/[Erase] → 마스크 수정<br>
+                        4. [Apply Mask] → 마스크 기반 경계 추출
+                    </p>
+                </div>
+            </div>
+
             <!-- Noise Filter Settings -->
             <div class="settings-section">
                 <h4>Noise Filtering</h4>
@@ -665,10 +749,19 @@
                     <h3>${file.name}</h3>
                     <div class="canvas-container">
                         <canvas id="canvas-${index}"></canvas>
+                        <canvas id="mask-canvas-${index}" class="mask-canvas"></canvas>
                     </div>
                     <div class="coord-info">
                         Start Point: <span id="coord-${index}">Not set</span>
                     </div>
+                    <div class="mask-controls" id="mask-controls-${index}" style="display:none;">
+                        <button class="mask-btn-auto" onclick="autoDetectMask(${index})">Auto Detect</button>
+                        <button class="mask-btn-draw" id="mask-draw-${index}" onclick="setMaskMode(${index}, 'draw')">Draw</button>
+                        <button class="mask-btn-erase" id="mask-erase-${index}" onclick="setMaskMode(${index}, 'erase')">Erase</button>
+                        <button class="mask-btn-clear" onclick="clearMask(${index})">Clear</button>
+                        <button class="mask-btn-apply" onclick="applyMaskBoundary(${index})">Apply Mask</button>
+                    </div>
+                    <div class="mask-status" id="mask-status-${index}"></div>
                     <div class="measurement-preview" id="preview-${index}" style="display:none;"></div>
                 `;
                 grid.appendChild(card);
@@ -679,6 +772,14 @@
                 canvas.height = img.height;
                 ctx.drawImage(img, 0, 0);
 
+                // Initialize mask canvas
+                const maskCanvas = document.getElementById(`mask-canvas-${index}`);
+                const maskCtx = maskCanvas.getContext('2d');
+                maskCanvas.width = img.width;
+                maskCanvas.height = img.height;
+                maskCanvas.style.maxWidth = '100%';
+                maskCanvas.style.height = 'auto';
+
                 const imageData = ctx.getImageData(0, 0, img.width, img.height);
                 const grayData = toGrayscale(imageData);
 
@@ -687,6 +788,10 @@
                     element: img,
                     canvas: canvas,
                     ctx: ctx,
+                    maskCanvas: maskCanvas,
+                    maskCtx: maskCtx,
+                    maskData: null,  // Uint8Array for mask (0 or 255)
+                    maskMode: null,  // 'draw' | 'erase' | null
                     grayData: grayData,
                     width: img.width,
                     height: img.height,
@@ -698,6 +803,7 @@
                 });
 
                 canvas.addEventListener('click', (e) => handleCanvasClick(e, index));
+                setupMaskCanvasEvents(index);
             }
 
             updateCounts();
@@ -858,6 +964,344 @@
                     }
                 }
             }
+        }
+
+        // ============================================
+        // MASK PREPROCESSING
+        // ============================================
+        function toggleMaskMode() {
+            const useMask = document.getElementById('useMaskGuide').checked;
+            document.getElementById('maskSettings').style.display = useMask ? 'block' : 'none';
+
+            // Show/hide mask controls for all images
+            state.images.forEach((img, i) => {
+                const controls = document.getElementById(`mask-controls-${i}`);
+                if (controls) {
+                    controls.style.display = useMask ? 'flex' : 'none';
+                }
+                // Clear mask mode when disabled
+                if (!useMask && img.maskCanvas) {
+                    img.maskMode = null;
+                    img.maskCanvas.classList.remove('editing');
+                }
+            });
+        }
+
+        function updateMaskOpacity() {
+            const opacity = document.getElementById('maskOpacity').value;
+            document.getElementById('maskOpacityValue').textContent = `${opacity}%`;
+
+            state.images.forEach(img => {
+                if (img.maskCanvas) {
+                    img.maskCanvas.style.opacity = opacity / 100;
+                }
+            });
+        }
+
+        function setupMaskCanvasEvents(index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas) return;
+
+            let isDrawing = false;
+
+            img.maskCanvas.addEventListener('mousedown', (e) => {
+                if (!img.maskMode) return;
+                isDrawing = true;
+                drawOnMask(e, index);
+            });
+
+            img.maskCanvas.addEventListener('mousemove', (e) => {
+                if (!isDrawing || !img.maskMode) return;
+                drawOnMask(e, index);
+            });
+
+            img.maskCanvas.addEventListener('mouseup', () => {
+                isDrawing = false;
+            });
+
+            img.maskCanvas.addEventListener('mouseleave', () => {
+                isDrawing = false;
+            });
+        }
+
+        function drawOnMask(e, index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas || !img.maskMode) return;
+
+            const rect = img.maskCanvas.getBoundingClientRect();
+            const scaleX = img.maskCanvas.width / rect.width;
+            const scaleY = img.maskCanvas.height / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            const brushSize = parseInt(document.getElementById('maskBrushSize').value) || 10;
+            const ctx = img.maskCtx;
+
+            // Initialize mask data if needed
+            if (!img.maskData) {
+                img.maskData = new Uint8Array(img.width * img.height);
+            }
+
+            // Draw on mask
+            const isDrawMode = img.maskMode === 'draw';
+            ctx.beginPath();
+            ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+
+            if (isDrawMode) {
+                ctx.fillStyle = 'rgba(0, 255, 0, 1)';
+                ctx.fill();
+            } else {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            // Update mask data
+            for (let dy = -brushSize; dy <= brushSize; dy++) {
+                for (let dx = -brushSize; dx <= brushSize; dx++) {
+                    if (dx * dx + dy * dy <= brushSize * brushSize) {
+                        const px = x + dx;
+                        const py = y + dy;
+                        if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+                            img.maskData[py * img.width + px] = isDrawMode ? 255 : 0;
+                        }
+                    }
+                }
+            }
+
+            updateMaskStatus(index);
+        }
+
+        function setMaskMode(index, mode) {
+            const img = state.images[index];
+            if (!img) return;
+
+            // Toggle mode
+            if (img.maskMode === mode) {
+                img.maskMode = null;
+                img.maskCanvas.classList.remove('editing');
+            } else {
+                img.maskMode = mode;
+                img.maskCanvas.classList.add('editing');
+            }
+
+            // Update button states
+            document.getElementById(`mask-draw-${index}`).classList.toggle('active', img.maskMode === 'draw');
+            document.getElementById(`mask-erase-${index}`).classList.toggle('active', img.maskMode === 'erase');
+
+            updateMaskStatus(index);
+        }
+
+        function clearMask(index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas) return;
+
+            img.maskCtx.clearRect(0, 0, img.width, img.height);
+            img.maskData = null;
+            updateMaskStatus(index);
+        }
+
+        function updateMaskStatus(index) {
+            const img = state.images[index];
+            const statusEl = document.getElementById(`mask-status-${index}`);
+            if (!statusEl) return;
+
+            if (!img.maskData) {
+                statusEl.textContent = 'Mask: Empty';
+                statusEl.className = 'mask-status';
+            } else {
+                const maskPixels = img.maskData.reduce((sum, v) => sum + (v > 0 ? 1 : 0), 0);
+                statusEl.textContent = `Mask: ${maskPixels.toLocaleString()} pixels | Mode: ${img.maskMode || 'view'}`;
+                statusEl.className = 'mask-status active';
+            }
+        }
+
+        function autoDetectMask(index) {
+            const img = state.images[index];
+            if (!img) return;
+
+            const method = document.getElementById('maskDetectMethod').value;
+            updateStatus(`Generating edge mask using ${method}...`);
+
+            // Generate edge map based on selected method
+            let edgeMap;
+            const { grayData, width, height } = img;
+
+            switch (method) {
+                case 'canny':
+                    const sigma = parseFloat(document.getElementById('cannySigma').value) || 1.4;
+                    const lowThreshold = parseFloat(document.getElementById('cannyLow').value) || 20;
+                    const highThreshold = parseFloat(document.getElementById('cannyHigh').value) || 50;
+                    edgeMap = performCannyEdgeDetection(grayData, width, height, sigma, lowThreshold, highThreshold);
+                    break;
+
+                case 'sobel':
+                    const sobelThreshold = parseFloat(document.getElementById('sobelThreshold').value) || 30;
+                    edgeMap = computeSobelEdgeMap(grayData, width, height, sobelThreshold);
+                    break;
+
+                case 'adaptive':
+                    const blockSize = parseInt(document.getElementById('adaptiveBlock').value) || 31;
+                    const thresholdC = parseFloat(document.getElementById('adaptiveC').value) || 10;
+                    const integral = computeIntegralImage(grayData, width, height);
+                    edgeMap = computeAdaptiveBinary(grayData, integral, width, height, blockSize, thresholdC);
+                    break;
+
+                default:
+                    edgeMap = performCannyEdgeDetection(grayData, width, height, 1.4, 20, 50);
+            }
+
+            // Store mask data
+            img.maskData = new Uint8Array(edgeMap);
+
+            // Draw mask on canvas
+            renderMaskToCanvas(index);
+            updateMaskStatus(index);
+            updateStatus(`Edge mask generated using ${method}. You can edit with Draw/Erase.`);
+        }
+
+        function computeSobelEdgeMap(grayData, width, height, threshold) {
+            const edgeMap = new Uint8Array(width * height);
+
+            const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+            const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let gx = 0, gy = 0;
+                    let ki = 0;
+
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const idx = (y + ky) * width + (x + kx);
+                            const val = grayData[idx];
+                            gx += val * sobelX[ki];
+                            gy += val * sobelY[ki];
+                            ki++;
+                        }
+                    }
+
+                    const magnitude = Math.sqrt(gx * gx + gy * gy);
+                    edgeMap[y * width + x] = magnitude > threshold ? 255 : 0;
+                }
+            }
+
+            return edgeMap;
+        }
+
+        function renderMaskToCanvas(index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas || !img.maskData) return;
+
+            const ctx = img.maskCtx;
+            ctx.clearRect(0, 0, img.width, img.height);
+
+            const imageData = ctx.createImageData(img.width, img.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < img.maskData.length; i++) {
+                const idx = i * 4;
+                if (img.maskData[i] > 0) {
+                    data[idx] = 0;       // R
+                    data[idx + 1] = 255; // G
+                    data[idx + 2] = 0;   // B
+                    data[idx + 3] = 255; // A
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function applyMaskBoundary(index) {
+            const img = state.images[index];
+            if (!img || !img.maskData || !img.startPoint) {
+                alert('시작점을 먼저 설정하고 마스크를 생성하세요.');
+                return;
+            }
+
+            const directionDeg = parseFloat(document.getElementById('directionAngle').value);
+            const rangeDeg = parseFloat(document.getElementById('scanRange').value);
+            const stepDeg = parseFloat(document.getElementById('angleStep').value);
+
+            // Extract boundary using mask
+            img.boundary = extractBoundaryFromMask(img, directionDeg, rangeDeg, stepDeg);
+
+            // Apply noise filter
+            const filter = document.getElementById('noiseFilter').value;
+            img.filteredBoundary = applyNoiseFilter(img.boundary, filter, img);
+
+            redrawCanvas(index);
+
+            // Check for clustered points
+            const clusterCheck = checkClusteredPoints(img.boundary, img.startPoint);
+
+            const preview = document.getElementById(`preview-${index}`);
+            preview.style.display = 'block';
+            let previewHtml = `<strong>Mask-based:</strong> ${img.boundary.length} points`;
+            if (img.filteredBoundary) {
+                previewHtml += ` | <strong>Filtered:</strong> ${img.filteredBoundary.length} points`;
+            }
+            if (clusterCheck.clustered) {
+                previewHtml += ` | <span style="color: #ff4444;">⚠️ Clustered</span>`;
+            }
+            preview.innerHTML = previewHtml;
+
+            updateStatus(`Mask-based boundary extracted: ${img.boundary.length} points`);
+
+            // Add to training data if in training mode
+            if (img.mode === 'training') {
+                const existingIdx = state.trainingData.contours.findIndex(c => c.imageIndex === index);
+                if (existingIdx >= 0) {
+                    state.trainingData.contours[existingIdx].points = img.boundary;
+                } else {
+                    state.trainingData.contours.push({
+                        imageIndex: index,
+                        points: img.boundary
+                    });
+                }
+                state.trainingData.angleConfig = { directionDeg, rangeDeg, stepDeg };
+                updateCounts();
+                updateButtons();
+            }
+        }
+
+        function extractBoundaryFromMask(img, directionDeg, rangeDeg, stepDeg) {
+            const { startPoint, grayData, width, height, maskData } = img;
+            const results = [];
+
+            const startAngle = directionDeg - rangeDeg;
+            const endAngle = directionDeg + rangeDeg;
+            const maxRadius = Math.ceil(Math.hypot(
+                Math.max(startPoint.x, width - startPoint.x),
+                Math.max(startPoint.y, height - startPoint.y)
+            ));
+
+            for (let angle = startAngle; angle <= endAngle; angle += stepDeg) {
+                const rad = angle * Math.PI / 180;
+                const dx = Math.cos(rad);
+                const dy = Math.sin(rad);
+
+                for (let r = 1; r < maxRadius; r++) {
+                    const x = Math.round(startPoint.x + r * dx);
+                    const y = Math.round(startPoint.y + r * dy);
+
+                    if (x < 0 || x >= width || y < 0 || y >= height) break;
+
+                    // Check if this point is on the mask
+                    if (maskData[y * width + x] > 0) {
+                        results.push({
+                            angle: angle,
+                            radius: r,
+                            x: startPoint.x + r * dx,
+                            y: startPoint.y + r * dy,
+                            intensity: grayData[y * width + x]
+                        });
+                        break;
+                    }
+                }
+            }
+
+            return results;
         }
 
         // ============================================

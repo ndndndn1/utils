@@ -1286,3 +1286,10 @@ trainin training required model 에서도 detect 기능 추가. 모든 점이 �
   2. 모든 점이 시작점 근처에 모여있으면:
     - 각 이미지 미리보기에 빨간색 "⚠️ Clustered" 표시
     - 모든 이미지가 clustered인 경우 알고리즘별 해결 방법 알림 표시
+
+## Q
+edge detection에서 비학습 방식에서는 어그러져도 찾으려고 시도는 하는데 
+  training 방식에서는 init 지점만 인식하고 다른 곳을 못 찾습니다
+
+  초기 지점 지정 시 영역 인식 가이드라인 전처리로 마스크가 필요할 경우, 다른 범용적인 edge detection
+  도구로 근처를 찾은 뒤 mask를 overlay하고 mask를 직접 수정/삭제/값변경 후 재시도 할 수 있도록 수정
