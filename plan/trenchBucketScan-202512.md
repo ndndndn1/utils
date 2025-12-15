@@ -1317,3 +1317,9 @@ Edge Mask Preprocessing
   - applyMaskBoundary(): 마스크 적용 후 training data에 추가
 
   이제 Training Required 모델에서 edge를 못 찾을 때 마스크로 직접 가이드할 수 있습니다
+
+## Q
+edge mask 작성 시
+  1)시작점에서 지정한 scan direction 방향이 edge 인식 대상입니다. 나머지 방향은 참조만 함 
+  2)mask brush size가 너무 큽니다. 조절 가능하게 하고, vector 기반으로 photoshop 과 같은 '편의성 높은'
+  베지어 곡선 도구도 지원해주세요

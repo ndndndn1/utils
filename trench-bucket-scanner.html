@@ -337,8 +337,25 @@
         .mask-btn-auto { background: #00d9ff; color: #1a1a2e; }
         .mask-btn-draw { background: #00ff88; color: #1a1a2e; }
         .mask-btn-erase { background: #ffaa00; color: #1a1a2e; }
+        .mask-btn-bezier { background: #ff66cc; color: #1a1a2e; }
         .mask-btn-clear { background: #ff4444; color: white; }
         .mask-btn-apply { background: #9933ff; color: white; }
+        .bezier-point {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #ff66cc;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: move;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+        .bezier-point.control {
+            background: #ffaa00;
+            width: 6px;
+            height: 6px;
+        }
         .mask-status {
             font-size: 10px;
             color: #888;
@@ -590,15 +607,23 @@
                     </div>
                     <div class="setting-row">
                         <label>Brush Size:</label>
-                        <input type="number" id="maskBrushSize" value="10" min="2" max="50">
-                        <span class="info-badge">Draw/Erase brush size</span>
+                        <input type="number" id="maskBrushSize" value="3" min="1" max="30">
+                        <span class="info-badge">Draw/Erase brush (1-30px)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            <input type="checkbox" id="showScanGuide" checked onchange="updateAllMaskGuides()">
+                            Show Scan Direction Guide
+                        </label>
                     </div>
                     <p class="help-text" style="margin-top: 10px;">
                         <strong style="color: #00d9ff;">사용법:</strong><br>
                         1. 이미지 클릭 → 시작점 설정<br>
                         2. [Auto Detect] → Edge 자동 감지<br>
-                        3. [Draw]/[Erase] → 마스크 수정<br>
-                        4. [Apply Mask] → 마스크 기반 경계 추출
+                        3. [Draw]/[Erase] → 브러시로 마스크 수정<br>
+                        4. [Bezier] → 곡선 도구 (클릭으로 점 추가, 더블클릭 완료)<br>
+                        5. [Apply Mask] → 마스크 기반 경계 추출<br>
+                        <span style="color: #ffaa00;">※ 노란 부채꼴 영역 = Scan Direction (경계 추출 대상)</span>
                     </p>
                 </div>
             </div>
@@ -758,6 +783,7 @@
                         <button class="mask-btn-auto" onclick="autoDetectMask(${index})">Auto Detect</button>
                         <button class="mask-btn-draw" id="mask-draw-${index}" onclick="setMaskMode(${index}, 'draw')">Draw</button>
                         <button class="mask-btn-erase" id="mask-erase-${index}" onclick="setMaskMode(${index}, 'erase')">Erase</button>
+                        <button class="mask-btn-bezier" id="mask-bezier-${index}" onclick="setMaskMode(${index}, 'bezier')">Bezier</button>
                         <button class="mask-btn-clear" onclick="clearMask(${index})">Clear</button>
                         <button class="mask-btn-apply" onclick="applyMaskBoundary(${index})">Apply Mask</button>
                     </div>
@@ -791,7 +817,9 @@
                     maskCanvas: maskCanvas,
                     maskCtx: maskCtx,
                     maskData: null,  // Uint8Array for mask (0 or 255)
-                    maskMode: null,  // 'draw' | 'erase' | null
+                    maskMode: null,  // 'draw' | 'erase' | 'bezier' | null
+                    bezierPoints: [],  // [{x, y, type: 'anchor'|'control'}]
+                    bezierCurves: [],  // Completed curves for mask
                     grayData: grayData,
                     width: img.width,
                     height: img.height,
@@ -893,6 +921,12 @@
             redrawCanvas(index);
             document.getElementById(`coord-${index}`).textContent = `(${x}, ${y})`;
             updateCounts();
+
+            // Update mask guide if mask mode is enabled
+            const useMask = document.getElementById('useMaskGuide')?.checked;
+            if (useMask) {
+                renderMaskToCanvas(index);
+            }
         }
 
         function redrawCanvas(index) {
@@ -1006,11 +1040,19 @@
 
             img.maskCanvas.addEventListener('mousedown', (e) => {
                 if (!img.maskMode) return;
+                if (img.maskMode === 'bezier') {
+                    handleBezierClick(e, index);
+                    return;
+                }
                 isDrawing = true;
                 drawOnMask(e, index);
             });
 
             img.maskCanvas.addEventListener('mousemove', (e) => {
+                if (img.maskMode === 'bezier') {
+                    previewBezierCurve(e, index);
+                    return;
+                }
                 if (!isDrawing || !img.maskMode) return;
                 drawOnMask(e, index);
             });
@@ -1022,11 +1064,18 @@
             img.maskCanvas.addEventListener('mouseleave', () => {
                 isDrawing = false;
             });
+
+            img.maskCanvas.addEventListener('dblclick', (e) => {
+                if (img.maskMode === 'bezier') {
+                    finalizeBezierCurve(index);
+                }
+            });
         }
 
         function drawOnMask(e, index) {
             const img = state.images[index];
             if (!img || !img.maskCanvas || !img.maskMode) return;
+            if (img.maskMode === 'bezier') return;
 
             const rect = img.maskCanvas.getBoundingClientRect();
             const scaleX = img.maskCanvas.width / rect.width;
@@ -1034,7 +1083,7 @@
             const x = Math.round((e.clientX - rect.left) * scaleX);
             const y = Math.round((e.clientY - rect.top) * scaleY);
 
-            const brushSize = parseInt(document.getElementById('maskBrushSize').value) || 10;
+            const brushSize = parseInt(document.getElementById('maskBrushSize').value) || 3;
             const ctx = img.maskCtx;
 
             // Initialize mask data if needed
@@ -1081,6 +1130,10 @@
                 img.maskMode = null;
                 img.maskCanvas.classList.remove('editing');
             } else {
+                // Clear bezier points when switching away from bezier mode
+                if (img.maskMode === 'bezier' && mode !== 'bezier') {
+                    finalizeBezierCurve(index);
+                }
                 img.maskMode = mode;
                 img.maskCanvas.classList.add('editing');
             }
@@ -1088,6 +1141,8 @@
             // Update button states
             document.getElementById(`mask-draw-${index}`).classList.toggle('active', img.maskMode === 'draw');
             document.getElementById(`mask-erase-${index}`).classList.toggle('active', img.maskMode === 'erase');
+            const bezierBtn = document.getElementById(`mask-bezier-${index}`);
+            if (bezierBtn) bezierBtn.classList.toggle('active', img.maskMode === 'bezier');
 
             updateMaskStatus(index);
         }
@@ -1098,6 +1153,9 @@
 
             img.maskCtx.clearRect(0, 0, img.width, img.height);
             img.maskData = null;
+            img.bezierPoints = [];
+            img.bezierCurves = [];
+            renderMaskWithGuide(index);
             updateMaskStatus(index);
         }
 
@@ -1191,25 +1249,295 @@
 
         function renderMaskToCanvas(index) {
             const img = state.images[index];
-            if (!img || !img.maskCanvas || !img.maskData) return;
+            if (!img || !img.maskCanvas) return;
 
             const ctx = img.maskCtx;
             ctx.clearRect(0, 0, img.width, img.height);
 
-            const imageData = ctx.createImageData(img.width, img.height);
-            const data = imageData.data;
+            // Draw mask data if exists
+            if (img.maskData) {
+                const imageData = ctx.createImageData(img.width, img.height);
+                const data = imageData.data;
 
-            for (let i = 0; i < img.maskData.length; i++) {
-                const idx = i * 4;
-                if (img.maskData[i] > 0) {
-                    data[idx] = 0;       // R
-                    data[idx + 1] = 255; // G
-                    data[idx + 2] = 0;   // B
-                    data[idx + 3] = 255; // A
+                for (let i = 0; i < img.maskData.length; i++) {
+                    const idx = i * 4;
+                    if (img.maskData[i] > 0) {
+                        data[idx] = 0;       // R
+                        data[idx + 1] = 255; // G
+                        data[idx + 2] = 0;   // B
+                        data[idx + 3] = 255; // A
+                    }
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+            }
+
+            // Draw scan direction guide
+            renderScanDirectionGuide(index);
+
+            // Draw bezier curves and points
+            renderBezierCurves(index);
+        }
+
+        function renderMaskWithGuide(index) {
+            renderMaskToCanvas(index);
+        }
+
+        function renderScanDirectionGuide(index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas || !img.startPoint) return;
+
+            const showGuide = document.getElementById('showScanGuide')?.checked;
+            if (!showGuide) return;
+
+            const ctx = img.maskCtx;
+            const { x: cx, y: cy } = img.startPoint;
+
+            const directionDeg = parseFloat(document.getElementById('directionAngle').value);
+            const rangeDeg = parseFloat(document.getElementById('scanRange').value);
+            const startAngle = (directionDeg - rangeDeg) * Math.PI / 180;
+            const endAngle = (directionDeg + rangeDeg) * Math.PI / 180;
+
+            // Calculate max radius for guide
+            const maxRadius = Math.min(
+                Math.max(cx, img.width - cx, cy, img.height - cy),
+                200  // Limit guide size
+            );
+
+            // Draw scan direction wedge
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, maxRadius, startAngle, endAngle);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.15)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw center direction line
+            const centerAngle = directionDeg * Math.PI / 180;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + maxRadius * Math.cos(centerAngle), cy + maxRadius * Math.sin(centerAngle));
+            ctx.strokeStyle = 'rgba(255, 200, 0, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw direction label
+            ctx.font = '12px sans-serif';
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
+            ctx.fillText(`${directionDeg}° ±${rangeDeg}°`, cx + 10, cy - 10);
+        }
+
+        function updateAllMaskGuides() {
+            state.images.forEach((img, i) => {
+                if (img.maskCanvas) {
+                    renderMaskToCanvas(i);
+                }
+            });
+        }
+
+        // ============================================
+        // BEZIER CURVE TOOL
+        // ============================================
+        function handleBezierClick(e, index) {
+            const img = state.images[index];
+            if (!img || img.maskMode !== 'bezier') return;
+
+            const rect = img.maskCanvas.getBoundingClientRect();
+            const scaleX = img.maskCanvas.width / rect.width;
+            const scaleY = img.maskCanvas.height / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            // Add point to bezier curve
+            img.bezierPoints.push({ x, y, type: 'anchor' });
+
+            renderMaskToCanvas(index);
+            updateMaskStatus(index);
+        }
+
+        function previewBezierCurve(e, index) {
+            const img = state.images[index];
+            if (!img || img.maskMode !== 'bezier' || img.bezierPoints.length === 0) return;
+
+            const rect = img.maskCanvas.getBoundingClientRect();
+            const scaleX = img.maskCanvas.width / rect.width;
+            const scaleY = img.maskCanvas.height / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            // Redraw and show preview line
+            renderMaskToCanvas(index);
+
+            const ctx = img.maskCtx;
+            const lastPoint = img.bezierPoints[img.bezierPoints.length - 1];
+
+            ctx.beginPath();
+            ctx.moveTo(lastPoint.x, lastPoint.y);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = 'rgba(255, 102, 204, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function renderBezierCurves(index) {
+            const img = state.images[index];
+            if (!img || !img.maskCanvas) return;
+
+            const ctx = img.maskCtx;
+
+            // Draw completed curves
+            for (const curve of img.bezierCurves) {
+                if (curve.length < 2) continue;
+
+                ctx.beginPath();
+                ctx.moveTo(curve[0].x, curve[0].y);
+
+                if (curve.length === 2) {
+                    ctx.lineTo(curve[1].x, curve[1].y);
+                } else {
+                    // Draw smooth curve through points using cardinal spline
+                    for (let i = 0; i < curve.length - 1; i++) {
+                        const p0 = curve[Math.max(0, i - 1)];
+                        const p1 = curve[i];
+                        const p2 = curve[i + 1];
+                        const p3 = curve[Math.min(curve.length - 1, i + 2)];
+
+                        const cp1x = p1.x + (p2.x - p0.x) / 6;
+                        const cp1y = p1.y + (p2.y - p0.y) / 6;
+                        const cp2x = p2.x - (p3.x - p1.x) / 6;
+                        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+                        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+                    }
+                }
+
+                ctx.strokeStyle = 'rgba(0, 255, 0, 1)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+
+            // Draw current bezier points
+            if (img.bezierPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(img.bezierPoints[0].x, img.bezierPoints[0].y);
+
+                for (let i = 1; i < img.bezierPoints.length; i++) {
+                    const prev = img.bezierPoints[i - 1];
+                    const curr = img.bezierPoints[i];
+
+                    if (i >= 2) {
+                        const p0 = img.bezierPoints[Math.max(0, i - 2)];
+                        const p1 = prev;
+                        const p2 = curr;
+                        const p3 = img.bezierPoints[Math.min(img.bezierPoints.length - 1, i + 1)];
+
+                        const cp1x = p1.x + (p2.x - p0.x) / 6;
+                        const cp1y = p1.y + (p2.y - p0.y) / 6;
+                        const cp2x = p2.x - (p3.x - p1.x) / 6;
+                        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+                        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+                    } else {
+                        ctx.lineTo(curr.x, curr.y);
+                    }
+                }
+
+                ctx.strokeStyle = 'rgba(255, 102, 204, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw anchor points
+                for (const p of img.bezierPoints) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ff66cc';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function finalizeBezierCurve(index) {
+            const img = state.images[index];
+            if (!img || img.bezierPoints.length < 2) {
+                if (img) img.bezierPoints = [];
+                renderMaskToCanvas(index);
+                return;
+            }
+
+            // Convert bezier curve to mask data
+            const points = img.bezierPoints;
+            img.bezierCurves.push([...points]);
+
+            // Rasterize the curve to mask
+            if (!img.maskData) {
+                img.maskData = new Uint8Array(img.width * img.height);
+            }
+
+            const brushSize = parseInt(document.getElementById('maskBrushSize').value) || 3;
+
+            // Draw curve points to mask
+            for (let t = 0; t <= 1; t += 0.005) {
+                const point = getCurvePoint(points, t);
+                const x = Math.round(point.x);
+                const y = Math.round(point.y);
+
+                // Fill brush area
+                for (let dy = -brushSize; dy <= brushSize; dy++) {
+                    for (let dx = -brushSize; dx <= brushSize; dx++) {
+                        if (dx * dx + dy * dy <= brushSize * brushSize) {
+                            const px = x + dx;
+                            const py = y + dy;
+                            if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+                                img.maskData[py * img.width + px] = 255;
+                            }
+                        }
+                    }
                 }
             }
 
-            ctx.putImageData(imageData, 0, 0);
+            img.bezierPoints = [];
+            renderMaskToCanvas(index);
+            updateMaskStatus(index);
+            updateStatus(`Bezier curve added to mask. Double-click to finish, click to continue.`);
+        }
+
+        function getCurvePoint(points, t) {
+            if (points.length < 2) return points[0] || { x: 0, y: 0 };
+            if (points.length === 2) {
+                return {
+                    x: points[0].x + t * (points[1].x - points[0].x),
+                    y: points[0].y + t * (points[1].y - points[0].y)
+                };
+            }
+
+            // Cardinal spline interpolation
+            const n = points.length - 1;
+            const segment = Math.min(Math.floor(t * n), n - 1);
+            const localT = (t * n) - segment;
+
+            const p0 = points[Math.max(0, segment - 1)];
+            const p1 = points[segment];
+            const p2 = points[segment + 1];
+            const p3 = points[Math.min(n, segment + 2)];
+
+            const t2 = localT * localT;
+            const t3 = t2 * localT;
+
+            // Catmull-Rom spline
+            return {
+                x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * localT + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+                y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * localT + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+            };
         }
 
         function applyMaskBoundary(index) {
